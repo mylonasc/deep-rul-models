@@ -21,10 +21,10 @@ def resample_and_featurize_dataset(dat_fname,nresample = 400,chunksize = 100000,
     *  Since we have the timestamp, and because the load controller does not have
        constant rate, rates of change of displacement are used.
 
-    *  An intuitive quantity that we see changing is the stiffness ratio. A quantity related
+    *  An intuitive quantity that we see changing is the tangent stiffness. A quantity related
        to stiffness for each timepoint is computed.
        A custom formula is used, to accomodate the large variations
-       in displacement ranges fordifferent experiments and for different
+       in displacement ranges for different experiments and for different
        parts of the lifetime of each experiment, without explicitly mean-normalizing,
        since we cannot compute reliably means with so few experiments, and
        hopefully without losing potentially useful information. If future experiments 
@@ -34,24 +34,17 @@ def resample_and_featurize_dataset(dat_fname,nresample = 400,chunksize = 100000,
        Update 19/12/2019: Trained models seems to generalize relatively well without advanced domain 
                           independence regularization .Tried experiments with adversarial 
                           domain regularization. This regularization may have been the cause of that.
-                          When trying to generalize for VA_4 while using VA_1, VA_2, VA_3 the results 
-                          are a bit better with no regularization! For other combinations the results 
-                          are in practice the same.
 
-       Update 10/01/2020  Domain adaptation turns out to help (in  top-3 accuracy) for 3/4 cases!
+       Update 10/01/2020  Domain adaptation turns out to help (in  top-3 accuracy) for 3/4 cases (surely for 2/4 with same failure mode).
 
                           * The one that doesn't improve with adv.training is the one with the worst generalization performance 
                             when not using adversarial training. The same one is the one having the most complex failure surface and 
                             fails on the threads! 
 
                           * There seems to be a mistake in the labeling of the anchors - there is a damaged point 
-                            in the nut consistent with the damage I see on the anchor.
-
-                          * The second worse case, is the other example that fails on the threads. It is weird that prediction 
-                            is even possible for this example! The failure surface is very different from the other two (and the 
-                            area of the surface). Currently looking for physical support of this phenomenon in the literature 
-                            (This is a particularly surprising and important finding - if it's scrutinized it may attract 
-                            the wrong type of attention).
+                            in the nut consistent with the damage I see on the anchor. Document accompanying the dataset labes "Sb" for failure mode anchors 1 and 3. 
+                            Consistency on failure mode for 1 and 3 is supported by the fact that when 1 or 3 are left-out, the prediction works for them (this is 
+                            expected if they have simmilar failure modes and not different!)
 
     """
     fname = os.path.join(*[root_dir, dat_fname])
