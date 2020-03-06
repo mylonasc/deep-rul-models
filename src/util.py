@@ -110,14 +110,17 @@ def plot_confusion_matrix(cm,
     #plt.show()
 
 #from src.util import digitize
-def load_hilti_fatigue_data(keep_from_end = 150000,    n_cycles_per_sub_block = 5, n_resampled = 300,nclasses = 15, leave_exp_out = 'VA_2', stage_2_from_disk = False,user_normalization = None):
+def load_hilti_fatigue_data(keep_from_end = 150000,    n_cycles_per_sub_block = 5, n_resampled = 300,nclasses = 15, leave_exp_out = 'VA_2', stage_2_from_disk = False,user_normalization = None, use_ds = None):
 
     #keep_from_end = 150000;
     #nclasses = 15
+    if use_ds is None:
+        use_ds = [1,2,3,4]
+
     if stage_2_from_disk:
         #keep_from_end = 300000;
 
-        for ds_idx in [1,2,3,4]:
+        for ds_idx in use_ds:
             print("proc:"+str(ds_idx))
             ds =pd.read_pickle("csv/subs_200k_200/subs_csvs/VA_test{}_stage_2.pickle".format(ds_idx))
             ds.reset_index(inplace = True)
@@ -261,7 +264,7 @@ class FatigueCyclesDataset(object):
     Left here for future reference.
     """
     def __init__(self,load_raw_from = "All_experiments" ,
-                 load_object_from_file = None,
+            load_object_from_file = None,
                  n_resample_cycles = 400,
                  nquant_levels = 20,
                  QZ = 5000,

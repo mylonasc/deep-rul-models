@@ -41,14 +41,14 @@ def make_densenet_parametrization_dictionary(n_depth = 6, filter_size = 5, kerne
 
 def make_densenet_block(xin,densenet_props, layer_prefix = "_"):
     """
-    With my implementation, number of output filters per layer should remains constant.
+    With this implementation, number of output filters per layer should remain constant.
     In order to use the same convolutional sub-network the number of input filters should
     be the same as the last time it was used. Otherwise there must be a
     transition with 1x1 convolution and the correct number of filters to the upcoming layer for
-    each subsequent use of the layer (which is what an earlier implementation did). This choice 
+    each subsequent use of the layer. This choice 
     seems to make the network a bit harder to train.
 
-    Batch normalization was never found to help with training - it was always harming accuracy and training speed.
+    Batch normalization was never found to help.
 
     input:
       xin            : an input tensor (time-series data)
@@ -122,11 +122,6 @@ def make_densenet_block(xin,densenet_props, layer_prefix = "_"):
     return keras.layers.Lambda(lambda x : x, name = "DN_{}_Out".format(layer_prefix))(output)
 
 
-def make_densenet_parametrization_dictionary(n_depth = 6, filter_size = 5, kernel_size = 5, dilation_rate = 8):
-    densenet_props = {"filters" : [filter_size] * n_depth,
-                      "dilation_rates" : [dilation_rate] * n_depth ,
-                      "kernel_sizes" : [kernel_size]*n_depth}
-    return densenet_props
 
 
 def make_model(nw_params):
@@ -137,7 +132,7 @@ def make_model(nw_params):
     that identifies the "domain" that we want our model to be invariant to.
     """
 
-    ## Helper function
+    ## Helper (factory) function
     def make_densenet_block_from_dict(h_curr, param_dict):
         params = param_dict["params"];
         name_pref = param_dict["id"];
@@ -157,6 +152,11 @@ def make_model(nw_params):
         return GlobalAveragePooling1D()(h_curr)
 
     def make_block_from_dict(h_curr, param_dict):
+        """
+        Write any new types of blocks here.
+        This allows all of the network 
+        to be parametrized by a simple JSON.
+        """
         string_to_function = {
             "densenet_block" : make_densenet_block_from_dict,
             "transition_block" : make_transition_from_dict,
