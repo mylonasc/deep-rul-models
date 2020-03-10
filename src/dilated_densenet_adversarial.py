@@ -178,6 +178,7 @@ def make_model(nw_params):
             h_curr = string_to_layer[pd_["type"]](**pd_["params"])(h_curr)
         return h_curr
         ### Create inputs:
+    print(nw_params)
     input_params = nw_params["inputs"]
     inputs = [];
     for ipt in input_params:
