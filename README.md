@@ -30,11 +30,28 @@ In the context of the bearing diagnosis dataset (or the anchors dataset) the fol
 * The progression of damage is important for prediction 
   * The progression of damage is different for each experiment
   * The underlying causes for the progression of damage are different for each experiment
-  * IID assumption implicit in training with batches not satisfied!
+  * IID assumption implicit in training with batches is not satisfied
 
 This is about a technique to deal with the aformentioned difficulties. The proposed technique is termed *Adversarial discriminative Domain Separation*.
 This is a combination of the domain separation idea (implicit analysis on shared/private features) of \[2\] and the shift of focus from *generation* to *discrimination* 
 as the objective driving learning as suggested in \[1\] and \[3\]. 
+
+## Joint learning of feature embeddings and transition models for arbitrarily spaced datapoints
+The standard method for dealing with non-linear time-series models, such as the one at hand, is to use an LSTM which summarizes state on the memory vectors. 
+In the problem of degradation, we have sporadic, potentially non-periodic measurements, and an unknown non-linear model that we need to learn on.
+There are problems with the use of recurrent models (LSTMs/AR) in general for degradation prediction. Namely,
+ * RNN assume explicit dependence only on the previous step and consequently straight-forwardly integrating information from the past may become hard. 
+ * In the absence of equispaced measurements, a particle filter or a Kalman filter has to be implemented for the stochastic evolution of the intermediate states. For long dependencies in absence of a good transition model this becomes highly problematic (it may work ok for known transition models though)
+
+With these 2 shortcomings in mind, I propose a model for time-series modeling that allows for long-term dependencies by considering the temporal order of observations, but without requiring 
+for consequtive measurements as all available auto-regressive measurements. I have not found a name for the techique yet. So far I have not found a reference in 
+the literature that does something like what I'm doing. The technique may find general applicability. For instance, 
+* it becomes possible to learn  dynamic models from keyframes
+* training is much more efficient since for learning non-linear dependencies long intermediate sequences do not need to be used.
+
+Examples/more info:
+* Fictitious degradation dataset: `2020-04-27_FictitiousDegradationDataset.ipynb`
+* real dataset: `/06_05_2020_Structured_Learning_GraphNets_Gamma.ipynb` 
 
 ## References
 * [\[1\]Domain adversarial training of neural networks](https://arxiv.org/abs/1505.07818)
