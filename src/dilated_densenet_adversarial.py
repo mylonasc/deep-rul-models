@@ -139,6 +139,11 @@ def make_model(nw_params):
         h_curr = make_densenet_block(h_curr, params, layer_prefix=name_pref)
         return h_curr
 
+    def make_cnn_block_from_dict(h_curr, param_dict):
+        params = param_dict["params"];
+        name_pref = param_dict["id"]
+        h_curr = make_cnn_block(h_curr, params, layer_prefix = name_pref)
+
     def make_transition_from_dict(h_curr, param_dict):
         params = param_dict["params"]
 

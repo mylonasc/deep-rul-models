@@ -14,6 +14,9 @@ class Node:
         
     def copy(self):
         node_attr_tensor = self.node_attr_tensor
+
+    def __add__(self, n):
+        return Node(self.node_attr_tensor + n.node_attr_tensor)
     
     
     
@@ -37,6 +40,11 @@ class Edge:
         node_from = nodes_correspondence[self.node_from]
         node_to   = nodes_correspondence[self.node_to]
         return Edge(edge_tensor, node_from, node_to)
+
+    def __add__(self, edge):
+        print("Edge addition is not implemented!")
+        assert(0)
+        
         
 class Graph:
     def __init__(self, nodes, edges):
@@ -50,7 +58,26 @@ class Graph:
         # Instantiate the new edges:
         coppied_edge_instances = []
         for e in self.edges:
-            enew = Edge(e.edge_tensor, nodes_correspondence[e.node_from], nodes_correspondence[e.node_to])
+            enew = Edge(e.edge_tensor.copy(), nodes_correspondence[e.node_from], nodes_correspondence[e.node_to])
             coppied_edge_instances.append(enew)
         return Graph(nodes_coppied, coppied_edge_instances)
+
+    def __add__(self, graph):
+        """
+        This should only work with graphs that have compatible node and edge features
+        Assumed also that the two graphs have the same connectivity (otherwise this will fail ugly of course)
+        """
+        nodes = [nself + n for nself,n in zip(self.nodes,graph.nodes)]
+        correspondence = {s:t for s, t in zip(self.nodes,nodes)}
+        added_edges = [];
+        for eself,e in zip(self.edges, graph.edges):
+            enew = Edge(eself.edge_tensor +  e.edge_tensor, 
+                    correspondence[eself.node_from], 
+                    correspondence[eself.node_to])
+            added_edges.append(enew);
+
+        return Graph(nodes, added_edges)
+
+
+
         
