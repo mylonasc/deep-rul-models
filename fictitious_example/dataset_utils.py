@@ -78,9 +78,12 @@ def get_dat(d, rr = None):
 
 
 def get_graph_training_data(dat, nsamples):
-    rand_1 = np.random.choice(int(dat['X'].shape[0]/3),nsamples)
-    rand_2 = np.random.choice(int(dat['X'].shape[0]/3),nsamples) + int(dat['X'].shape[0]/3)
-    rand_3 = np.random.choice(int(dat['X'].shape[0]/3),nsamples) + int(dat['X'].shape[0]/3) * 2
+    #print("FIX THAT! Somehow the edges have information on the remaining cycles!")
+    #assert(False)
+    #rand_1 = np.sort(np.random.choice(int(dat['X'].shape[0],nsamples))
+    rand_1 = np.random.choice(int(dat['X'].shape[0]/2),nsamples)
+    rand_2 = rand_1 + np.random.choice(10,nsamples)
+    rand_3 = rand_2 + np.random.choice(10,nsamples)
     X_n1, X_n2, X_n3 = [dat['X'][r_][..., np.newaxis] for r_ in [rand_1, rand_2, rand_3]]
     t_n1, t_n2, t_n3 = [dat['y'] [r_] for r_ in [rand_1, rand_2, rand_3]]
     dt_12 = t_n2 - t_n1
