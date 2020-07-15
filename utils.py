@@ -1,5 +1,5 @@
 import numpy as np
-from fictitious_example.minigraphnets import Edge,Node, Graph
+from minigraphnets import Edge,Node, Graph
 
 def get_indices(nsamples, ntotal_inds, nmin_idx = 0, nseq_range = None, nmin_idx_diff = None,npoints_per_seq = None,fixed_spacing_indices = False):
         
