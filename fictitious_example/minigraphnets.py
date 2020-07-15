@@ -65,7 +65,7 @@ class Graph:
     def __add__(self, graph):
         """
         This should only work with graphs that have compatible node and edge features
-        Assumed also that the two graphs have the same connectivity (otherwise this will fail ugly of course)
+        Assumed also that the two graphs have the same connectivity (otherwise this will fail ugly)
         """
         nodes = [nself + n for nself,n in zip(self.nodes,graph.nodes)]
         correspondence = {s:t for s, t in zip(self.nodes,nodes)}
