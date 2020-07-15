@@ -2,15 +2,52 @@ import numpy as np
 import os
 from collections import OrderedDict
 
+import socket
+
+KNOWN_HOSTS = ['marvin']
+IN_COLAB = False
+HOSTNAME = socket.gethostname()
+DEFAULT_NPZ_FILE = None
+ROOTFOLDER_PICKLES = None
+
+
+try:
+    from google.colab import drive
+    drive.mount('/content/gdrive')
+    IN_COLAB = True
+
+    ROOTFOLDER_PICKLES = None  #'/Dataset/bearing_fatigue_dataset/'
+    DEFAULT_NPZ_FILE ='/content/drive/My Drive/FEMTO_Bearings/first_stage_preproc_bearings.npz'
+except:
+    print("not running in colab.")
+    if HOSTNAME not in KNOWN_HOSTS:
+        print("Not supported! See/edit code.")
+
+if HOSTNAME == 'marvin':
+    ROOTFOLDER_PICKLES = '/mnt/860EVO_1TB/Dataset/bearing_fatigue_dataset/'
+    DEFAULT_NPZ_FILE ='/mnt/860EVO_1TB/Dataset/bearing_fatigue_dataset/first_stage_preproc_bearings.npz'
+
+
+
 class FEMTOBearingsDataset:
     """
     A class to manage the bearings dataset.
     """
-    def __init__(self, rootfolder_pickles = None, npz_file = "first_stage_preproc_bearings.npz"):
+    def __init__(self, rootfolder_pickles = ROOTFOLDER_PICKLES, npz_file = DEFAULT_NPZ_FILE, from_npz = True):
+
         self.npz_file = npz_file
-        self.all_files = [f for f in os.listdir(os.path.join('bearing_fatigue_dataset')) if 'pickle' in f]
-        if rootfolder_pickles is None:
-            L = np.load("first_stage_preproc_bearings.npz")
+        # The files may not be available. The npz is usually used (faster).
+        self.all_files = ['AccB_1_6.pickle', 'AccB_2_2.pickle', 
+                'AccB_2_5.pickle', 'AccB_2_4.pickle', 
+                'AccB_2_6.pickle', 'AccB_1_1.pickle', 
+                'AccB_2_7.pickle', 'AccB_1_5.pickle', 
+                'AccB_3_2.pickle', 'AccB_2_1.pickle', 
+                'AccB_3_1.pickle', 'AccB_2_3.pickle', 
+                'AccB_3_3.pickle', 'AccB_1_7.pickle', 
+                'AccB_1_2.pickle', 'AccB_1_4.pickle', 
+                'AccB_1_3.pickle'] #[f for f in os.listdir(rootfolder_pickles) if 'pickle' in f]
+        if from_npz:
+            L = np.load(self.npz_file)
             self.yrem_s_raw, self.X, self.eid = [L[l] for l in L.files]
         else:
             self.rootfolder = rootfolder_pickles
