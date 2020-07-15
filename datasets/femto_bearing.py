@@ -13,7 +13,7 @@ ROOTFOLDER_PICKLES = None
 
 try:
     from google.colab import drive
-    drive.mount('/content/gdrive')
+    drive.mount('/content/drive')
     IN_COLAB = True
 
     ROOTFOLDER_PICKLES = None  #'/Dataset/bearing_fatigue_dataset/'
