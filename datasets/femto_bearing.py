@@ -92,6 +92,10 @@ class FEMTOBearingsDataset:
 
         self.inds_exp_target,self.inds_exp_source = self.get_data_bearings_RUL()# call once with default parameters so the corresponding fields exist for further use.
 
+    def get_dataset_config(self):
+        return {'training_set' : self.inds_exp_source, 'validation_set' : self.inds_exp_target } 
+
+
 
     def get_data_bearings_RUL(self,min_samples_keep = 910,
                       normalization_factor_time = 25000,

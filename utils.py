@@ -13,6 +13,7 @@ def get_indices(nsamples, ntotal_inds, nmin_idx = 0, nseq_range = None, nmin_idx
         
         if fixed_spacing_indices:
             s_ = np.array([i for i in range(1,nseq_range, nmin_idx_diff)]).astype(int)
+            s_ = s_[0:npoints_per_seq]
         else:
             s_ = np.sort(np.random.choice(range(1,nseq_range, nmin_idx_diff), npoints_per_seq, replace = False)).astype(int)
         

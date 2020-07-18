@@ -1,32 +1,43 @@
 import numpy as np
 import tensorflow_probability as tfp
 tfd = tfp.distributions
+import os
 
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Dense, Conv1D, GlobalAveragePooling1D, Dropout
 from tensorflow.keras import Sequential,Model
 import tensorflow.keras as keras
 
+import inspect
 class GraphNetFunctionFactory:
-    def __init__(self, NETWORK_SIZE_GLOBAL = 50, USE_PRENETWORKS = True, EDGE_NODE_STATE_SIZE = 15):
+    def __init__(self, network_size_global= 50, use_prenetworks= True, edge_node_state_size= 15, graph_function_output_activation = "gated_tanh"):
         """
         Summary: 
           A factory for graphnet functions. It is custom made for the problems of RUL from time-series. 
           It can be adapted to other prediction models. All models (except the aggregation function) are 
           relatively small MLPs terminated by sigmoid()*tanh() activation (simple tanh could also work).
           
-        NETWORK_SIZE_GLOBAL: A parameter controlling the width of different networks involved.
+        network_size_global: A parameter controlling the width of different networks involved.
     
-        USE_PRENETWORKS:     Use a deeper architecture (see code)
+        use_prenetworks:     Use a deeper architecture (see code)
         
-        GRAPH_STATE_SIZE:    the size of the node states, and edge states. This is needed
-                             to create consistent graph functions. Eventhough here I'm using the same global size,
-                             the sizes of edge states and node states can be different.
+        edge_node_state_size:  the size of the node states, and edge states. This is needed
+                               to create consistent graph functions. Eventhough here I'm using the same global size,
+                               the sizes of edge states and node states can be different.
+
+        graph_function_activation: controls how the graph functions are terminated. The special option "gated_tanh" is the default (RNN/Wavenet-like activation). Original graphnets had ReLU.
+
         """
-        self.network_size_global = NETWORK_SIZE_GLOBAL
-        self.use_prenetworks = USE_PRENETWORKS
-        self.edge_and_node_state_size = EDGE_NODE_STATE_SIZE
-    
+        self.network_size_global =network_size_global 
+        self.use_prenetworks = use_prenetworks 
+        self.edge_and_node_state_size = edge_node_state_size 
+        self.graph_function_output_activation = graph_function_output_activation
+        self.model_constr_dict= str(inspect.getargvalues(inspect.currentframe()).locals)
+        self.model_str = str(self.model_constr_dict)
+        
+    def get_hash(self):
+        import hashlib
+        return hashlib.md5(self.model_str.encode("utf-8"))
 
     def make_gamma_node_observation_mlp(self, n_node_state_output):
         """
@@ -104,12 +115,42 @@ class GraphNetFunctionFactory:
             edge_out = Dense(self.network_size_global,  use_bias = True, name = "edge_gi_input_fcn2")(edge_out)
             edge_out = tf.keras.layers.LeakyReLU()(edge_out)
 
-        edge_out_gate = Dense(n_edge_state_output, use_bias = False, activation = "sigmoid", name = "edge_gi_fcnA")(edge_out)
-        edge_outB = Dense(n_edge_state_output, use_bias = False, activation = "tanh", name = "edge_gi_fcnB")(edge_out)
-        edge_out = edge_outB * edge_out_gate 
+#        if self.graph_function_output_activation == 'gated_tanh':
+#            edge_out_gate = Dense(n_edge_state_output, use_bias = False, activation = "sigmoid", name = "edge_gi_fcnA")(edge_out)
+#            edge_outB = Dense(n_edge_state_output, use_bias = False, activation = "tanh", name = "edge_gi_fcnB")(edge_out)
+#            edge_out = edge_outB * edge_out_gate 
+#        else:
+#            edge_out_gate = Dense(n_edge_state_output, use_bias = False, activation = self.graph_function_output_activation, name = "edge_gi_fcnA")(edge_out)
+        edge_out = self.network_function_output(edge_out, 
+                name_prefix = "edge_gi",
+                output_size = n_edge_state_output) # Attention! Reads parameters from the factory class. Written for avoiding code repetition, not for clarity.
+
         edge_mlp = Model(inputs = edge_state_in,outputs = edge_out)
+
         
         return edge_mlp
+
+    def network_function_output(self,tensor_in,name_prefix = None, output_size = None): 
+        """
+        Implement the gated_tanh output head and treat it uniformly with other options for the output network options (useful for hyperparameter searches)
+        """
+
+        if self.graph_function_output_activation== 'gated_tanh': # not realy an activation...
+            _out_gate = Dense(output_size, use_bias = False, activation = "sigmoid", name = "%s_fcnA"%name_prefix)(tensor_in)
+            _outB = Dense(output_size, use_bias = False, activation = "tanh", name = "%s_fcnB"%name_prefix)(tensor_in)
+            _out = _outB * _out_gate
+            #_mlp = Model(inputs = tensor_in,outputs = _out)
+        else:
+            _out = Dense(output_size, use_bias = False, activation = self.graph_function_output_activation, name = "%s_fcn"%name_prefix)(tensor_in)
+            #edge_mlp = Model(inputs = tensor_in,outputs = _out)
+
+        return _out
+
+
+
+
+
+        
 
     def make_edge_aggregation_function(self,edge_out_shape):
         xin = tf.keras.layers.Input(shape = (None,edge_out_shape))
@@ -142,37 +183,57 @@ class GraphNetFunctionFactory:
 
 
 
-    def make_conv_input_head_node_function(self,edge_input_dummy_size , nfilts = 18, nfilts2 = 50, ksize = 3, output_size = None):
+    def make_conv_input_head_node_function(self,edge_input_dummy_size , n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, output_size = None, use_dropout = True, activation_type = 'leaky_relu'):
+        """
+        A simple 1D CNN for extracting features from the timeseries. It is used in the graph_independent graphnet block. 
+        Each conv block is as such:
+         * 1Dconv kernelsize/stride/filters : 1 / 1 / nfilts2 (e.g. 50)
+         * 1Dconv kernelsize/stride/filters : 2 / 2 / nfilts  (e.g. 18)
+         * 1Dconv kernelsize/stride/filters : 2 / 2 / nfilts  (e.g. 18)
+         * (optional) dropout(0.2)
+         * activation
+         * 1Dconv kernelsize/stride/filters : 2 / 2 / nfilts  (e.g. 18)
+         * AveragePooling(kernel = 2)
+
+         The network returned is `n_conv_blocks' of the aformentioned stacked. 
+
+        parameters:
+            n_conv_blocks : number of convolutional blocks stacked.
+            nfilts        : number of bottleneck filts (for instance 18)
+            nfilts2       : number of filters for the 1x1 convolution (typically larger than nfilts)
+            ksize         : size of kernel used for all internal convs (3)
+            output_size   : the node state size (default: None)
+            use_dropout   : use/notuse dropout between conv layers (some literature suggests it does not help)
+            activation    : the activation used after the dropout layer.
+
+          edge_input_dummy_size : This has to do with the implementation of the node block. For uniform treatment of edge inputs, 
+        """
+        txt2act = {'relu' : tf.keras.layers.ReLU(), 'leaky_relu' : tf.keras.layers.LeakyReLU()}
+        _activation = lambda: txt2act[activation_type]
+
 
         xin_node_ts = tf.keras.Input(shape = (None, 2) , name = "timeseries_input"); 
         xin_edge_dummy = tf.keras.Input(shape = ( edge_input_dummy_size), name = "edge_input_dummy");
 
-        yout = Conv1D(kernel_size = 1 ,  filters = nfilts2, strides = 1, use_bias= False,name = "conv_fcnA")(xin_node_ts)
-        yout = Conv1D(kernel_size=ksize, filters = nfilts, strides=2  , use_bias= False,name = "conv_fcnB")(yout)
-        yout = Conv1D(kernel_size=ksize, filters = nfilts, strides=2  , use_bias= False,name = "conv_fcnC")(yout)
-        #yout = Dropout(rate = 0.2)(yout)
-        yout = Conv1D(kernel_size=ksize,strides=2, filters = nfilts2,use_bias= True)(yout)
-        yout = tf.keras.layers.LeakyReLU()(yout)
+        def conv_block(conv_block_input, names_suffix= ""):
+            yout_ = Conv1D(kernel_size = 1 ,  filters = nfilts2, strides = 1, use_bias= False,name = "conv_fcnA"+names_suffix)(conv_block_input)
+            yout_ = Conv1D(kernel_size=ksize, filters = nfilts, strides=2  , use_bias= False,name  = "conv_fcnB"+names_suffix)(yout_)
+            yout_ = Conv1D(kernel_size=ksize, filters = nfilts, strides=2  , use_bias= False,name  = "conv_fcnC"+names_suffix)(yout_)
+            if use_dropout:
+                yout_ = Dropout(rate = 0.2)(yout_)
+            yout_ = Conv1D(kernel_size=ksize,strides=2, filters = nfilts2,use_bias= True)(yout_)
+            yout_ = _activation()(yout_)
+            #yout_ = keras.layers.AveragePooling1D(pool_size=2)(yout_)
+            return yout_
+        
+        yout = conv_block(xin_node_ts)
         yout = keras.layers.AveragePooling1D(pool_size=2)(yout)
+        for b in range(n_conv_blocks-1):
+            yout = conv_block(yout, names_suffix=str(b))
+        
 
-        yout = Conv1D(kernel_size = 1 ,  filters = nfilts2, strides = 1, use_bias= False,name = "conv_fcnA3")(yout)
-        yout = Conv1D(kernel_size=ksize, filters = nfilts , strides=2  , use_bias= False,name = "conv_fcnB3")(yout)
-        yout = Conv1D(kernel_size=ksize, filters = nfilts , strides=2  , use_bias= False,name = "conv_fcnC3")(yout)
-        #yout = Dropout(rate = 0.2)(yout)
-        yout = Conv1D(kernel_size=ksize,strides=2, filters = nfilts2,use_bias= True)(yout)
-        yout = tf.keras.layers.LeakyReLU()(yout)
-        #yout = keras.layers.AveragePooling1D(pool_size=2)(yout)
-
-        yout = Conv1D(kernel_size = 1 ,  filters = nfilts2, strides = 1, use_bias= False,name = "conv_fcnA4")(yout)
-        yout = Conv1D(kernel_size=ksize, filters = nfilts , strides=2  , use_bias= False,name = "conv_fcnB4")(yout)
-        yout = Conv1D(kernel_size=ksize, filters = nfilts , strides=2  , use_bias= False,name = "conv_fcnC4")(yout)
-        #yout = Dropout(rate = 0.2)(yout)
-        yout = Conv1D(kernel_size=ksize,strides=2, filters = nfilts2,use_bias= True)(yout)
-        yout = tf.keras.layers.LeakyReLU()(yout)
-        #yout = keras.layers.AveragePooling1D(pool_size=2)(yout)
-
-        #yout = keras.layers.GlobalAveragePooling1D()(yout)
-        yout = keras.layers.GlobalMaxPooling1D()(yout)
+        yout = keras.layers.GlobalAveragePooling1D()(yout)
+        #yout = keras.layers.GlobalMaxPooling1D()(yout)
         yout = Dense(output_size, use_bias = True)(yout)
         yout = keras.layers.LayerNormalization()(yout)
         yout = tf.keras.layers.LeakyReLU()(yout)
@@ -232,14 +293,14 @@ class GraphNetFunctionFactory:
         self.core = gn
         self.graph_indep = graph_indep
         
-    def eval_graphnets(self,graph_data_, iterations = 5):
+    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched"):
         """
         graph_data_  : is a "graph" object that contains a batch of graphs (more correctly, a graph tuple as DM calls it)
         iterations   : number of core iterations for the computation.
         """
-        graph_out = self.graph_indep.graph_eval(graph_data_)
+        graph_out = self.graph_indep.graph_eval(graph_data_,eval_mode = eval_mode)
         for iterations in range(iterations):
-            graph_out = self.core.graph_eval(graph_out) + graph_out # Addition adds all representations (look at implementation of "Graph")
+            graph_out = self.core.graph_eval(graph_out, eval_mode = eval_mode) + graph_out # Addition adds all representations (look at implementation of "Graph")
 
         # Finally the node_to_prob returns a reparametrized "Gamma" distribution from only the final node state
         return self.core.node_to_prob_function(graph_out.nodes[-1].node_attr_tensor) 
@@ -281,35 +342,58 @@ class GraphNet:
         
     def observe_node(self, node):
         self.node_to_prob_function(node)
-        
-    def graph_eval(self, graph):
+
+    def graph_eval(self, graph, eval_mode = "batched"):
         # Evaluate all edge functions:
-        self.eval_edge_functions(graph)
-        
-        batch_size             = graph.nodes[0].shape[0]; # This will be related to the input graph tuple. 
-        
+        self.eval_edge_functions(graph, eval_mode = eval_mode)
+
+        batch_size             = graph.nodes[0].shape[0]; # This will be related to the input graph tuple.
+
         edge_input_size = self.edge_input_size ; # This relates to the graphnet being evaluated.
-        
+
         # Aggregate edges per node:
         edge_to_node_agg_dummy = np.zeros([batch_size, edge_input_size]);
-        
+
+        # Compute the edge-aggregated messages:
+        edge_agg_messages_batch = []
+        node_agg_messages_batch = []
         for n in graph.nodes:
-            if len(n.incoming_edges) is not 0:                
+            if len(n.incoming_edges) is not 0:
                 if self.edge_aggregation_function is not None:
                     edge_vals_ = tf.stack([e.edge_tensor for e in n.incoming_edges])
                     edge_to_node_agg = self.edge_aggregation_function(edge_vals_)
-                    node_attr_tensor = self.node_function([edge_to_node_agg, n.node_attr_tensor])
-                    n.set_tensor(node_attr_tensor)
                 else:
-                    node_attr_tensor = self.node_function([edge_to_node_agg_dummy,n.node_attr_tensor])
-                    n.set_tensor(node_attr_tensor)
-                    
+                    edge_to_node_agg = edge_to_node_agg_dummy
             else:
-                node_attr_tensor = self.node_function([edge_to_node_agg_dummy, n.node_attr_tensor])
+                edge_to_node_agg = edge_to_node_agg_dummy
+
+            #Inside the loop!
+            if eval_mode == 'safe':
+                node_attr_tensor = self.node_function([edge_to_node_agg, n.node_attr_tensor])
                 n.set_tensor(node_attr_tensor)
-        
+
+            if eval_mode == 'batched':
+                edge_agg_messages_batch.append(edge_to_node_agg)
+                node_agg_messages_batch.append(n.node_attr_tensor)
+
+        if eval_mode == 'batched':
+            node_function = self.node_function
+            node_input_shape = graph.nodes[0].shape # nodes and edges (therefore graphs as well) could contain multiple datapoints. This is to treat this case.
+            node_output_shape =self.node_function.output.shape
+
+            nodes_agg_messages_concat = tf.concat(node_agg_messages_batch,axis = 0)
+            edges_agg_messages_concat = tf.concat(edge_agg_messages_batch, axis = 0)
+            batch_res = self.node_function([edges_agg_messages_concat, nodes_agg_messages_concat])
+
+            unstacked = tf.unstack(tf.reshape(batch_res,[-1,*node_input_shape[0:1],*node_output_shape[1:]]), axis = 0)
+            for n, nvalue in zip(graph.nodes, unstacked):
+                n.set_tensor(nvalue)
+
         return graph
-    
+
+
+
+        
     def save(self, path):
         functions = [self.node_function, self.edge_aggregation_function, self.edge_function, self.node_to_prob_function]
         path_labels = ["node_function", "edge_aggregation_function", "edge_function", "node_to_prob"]
@@ -340,18 +424,56 @@ class GraphNet:
                 model_fcn = tf.keras.models.load_model(d_)
                 path_label_to_function[l] = model_fcn
             
-           
-    def eval_edge_functions(self,graph):
+    def eval_edge_functions(self,graph, eval_mode = "batched"):
         """
-        Evaluate all edge functions
+        Evaluate all edge functions. Batched mode has some shape juggling going on.
+        If you see weird behaviour that's the first place to look (tests not written yet. :totest:)
+        
+        params:
+          graph     - the graph containing the edges 
+          eval_mode - "safe" or "batched" (batched is also safe if state shapes are respected)
         """
-        if self.edge_aggregation_function is None:
-            for edge in graph.edges:
-                edge_tensor = self.edge_function([edge.edge_tensor])
-                edge.set_tensor(edge_tensor)
+        assert(eval_mode in ['safe', 'batched'])
+        if len(graph.edges) == 0:
+            return 
+        
+        if self.edge_aggregation_function is None: # this happens in graph-independent networks (there is no aggregation)
+            if eval_mode == 'safe':
+                for edge in graph.edges:
+                    edge_tensor = self.edge_function([edge.edge_tensor])
+                    edge.set_tensor(edge_tensor)
+                    
+            if eval_mode == 'batched':
+                edges_ = graph.edges
+                edges_shape = edges_[0].shape
+                edges_concat = tf.concat([e.edge_tensor for e in edges_],axis = 0)
+                batch_res = self.edge_function([edges_concat])
+                unstacked = tf.unstack(tf.transpose(tf.reshape(batch_res,[-1,*edges_shape[0:1],*batch_res.shape[1:]]),[0,1,2]), axis = 0)
+                for e, evalue in zip(edges_, unstacked):
+                    e.set_tensor(evalue)
+
                 
         else:
-            for edge in graph.edges:
-                edge_tensor = self.edge_function([edge.edge_tensor, edge.node_from.node_attr_tensor, edge.node_to.node_attr_tensor])
-                edge.set_tensor(edge_tensor)
+            if eval_mode == 'safe':
+                for edge in graph.edges:
+                    edge_tensor = self.edge_function([edge.edge_tensor, edge.node_from.node_attr_tensor, edge.node_to.node_attr_tensor])
+                    edge.set_tensor(edge_tensor)
+                    
+            if eval_mode == 'batched':
+                edges_ = graph.edges
+                edge_function = self.edge_function
+                edges_shape = edges_[0].shape
+                
+                edges_concat = tf.concat([e.edge_tensor for e in edges_],axis = 0)
+                node_from_concat = tf.concat([e.node_from.node_attr_tensor for e in edges_], axis = 0)
+                node_to_concat= tf.concat([e.node_to.node_attr_tensor for e in edges_],axis = 0)
+
+                
+                #         inps = { 'edge_state': edges_concat, 'node_sender' : node_from_concat, 'node_receiver' : node_to_inputs}
+                #         res = edge_function(inps)
+                batch_res = self.edge_function([edges_concat, node_from_concat, node_to_concat])
+                unstacked = tf.unstack(tf.transpose(tf.reshape(batch_res,[-1,*edges_shape[0:1],*batch_res.shape[1:]]),[0,1,2]), axis = 0)
+                for e, evalue in zip(edges_, unstacked):
+                    e.set_tensor(evalue)
+           
                 
