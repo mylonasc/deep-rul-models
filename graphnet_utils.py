@@ -10,7 +10,8 @@ import tensorflow.keras as keras
 
 import inspect
 class GraphNetFunctionFactory:
-    def __init__(self, network_size_global= 50, use_prenetworks= True, edge_node_state_size= 15, graph_function_output_activation = "gated_tanh"):
+    def __init__(self, network_size_global= 50, use_prenetworks= True, edge_node_state_size= 15, graph_function_output_activation = "gated_tanh", 
+            n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, conv_block_activation_type = 'leaky_relu'):
         """
         Summary: 
           A factory for graphnet functions. It is custom made for the problems of RUL from time-series. 
@@ -34,6 +35,13 @@ class GraphNetFunctionFactory:
         self.graph_function_output_activation = graph_function_output_activation
         self.model_constr_dict= str(inspect.getargvalues(inspect.currentframe()).locals)
         self.model_str = str(self.model_constr_dict)
+        # Passed with other vargs on construction:
+        self.cnn_params = {'n_conv_blocks' : n_conv_blocks ,
+                'nfilts' : nfilts, 
+                'nfilts2' : nfilts2, 
+                'ksize': ksize ,
+                'activation_type' : conv_block_activation_type}
+
         
     def get_hash(self):
         import hashlib
@@ -263,7 +271,9 @@ class GraphNetFunctionFactory:
                                             n_edge_state_output= n_edge_output_gi,
                                             n_node_state_input = n_node_state_input_gi)
 
-        node_mlp_gi = self.make_conv_input_head_node_function(edge_input_dummy_size=n_edge_state_input_gi, output_size = n_node_state_input)
+        conv_head_params = self.cnn_params
+        conv_head_params.update({'edge_input_dummy_size' : n_edge_state_input_gi, 'output_size' : n_node_state_input })
+        node_mlp_gi = self.make_conv_input_head_node_function(**conv_head_params ) #edge_input_dummy_size=n_edge_state_input_gi, output_size = n_node_state_input)
 
         node_mlp_gi([np.random.randn(batch_size,n_edge_state_input_gi),np.random.randn(batch_size,n_node_state_input_gi,2)])
         
@@ -475,5 +485,7 @@ class GraphNet:
                 unstacked = tf.unstack(tf.transpose(tf.reshape(batch_res,[-1,*edges_shape[0:1],*batch_res.shape[1:]]),[0,1,2]), axis = 0)
                 for e, evalue in zip(edges_, unstacked):
                     e.set_tensor(evalue)
+
+
            
                 
