@@ -328,7 +328,7 @@ class GraphNetFunctionFactory:
         gn = GraphNet(edge_function = edge_mlp,
                       node_function=node_mlp,
                       edge_aggregation_function=edge_aggregation_function,
-                      node_to_prob_function= node_to_prob_mlp)
+                      node_to_prob= node_to_prob_mlp)
         self.core = gn
         self.graph_indep = graph_indep
 
