@@ -9,6 +9,10 @@ from tensorflow.keras import Sequential,Model
 import tensorflow.keras as keras
 
 import inspect
+
+def _instantiate_gamma(t, NParams_ = 1):
+    return tfd.Gamma(concentration = t[...,0:NParams_], rate = t[...,NParams_:2*NParams_])
+
 class GraphNetFunctionFactory:
     def __init__(self, network_size_global= 50, use_prenetworks= True, edge_node_state_size= 15, graph_function_output_activation = "gated_tanh", 
             n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, conv_block_activation_type = 'leaky_relu'):
@@ -42,6 +46,33 @@ class GraphNetFunctionFactory:
                 'ksize': ksize ,
                 'activation_type' : conv_block_activation_type}
 
+    @staticmethod
+    def make_from_record(record):
+        """
+        Method to easilly create the object from a record.
+        Subsequently it is loaded from disk.
+        """
+
+        s = inspect.signature(GraphNetFunctionFactory.__init__)
+
+        # Depending on whether the input is a dictionary or a pd dataframe, transform the 
+        # keys to a list in order to pass them to the constructor.
+        import pandas as pd
+        record_type_to_list_transformation = {
+                    pd.core.series.Series : lambda x : list(x.index),
+                    dict : lambda k : [k for k in x.keys()]
+                }
+
+        l_ = record_type_to_list_transformation[type(record)](record)
+
+        l = [s_ for s_ in s.parameters.keys() if s_ in l_]
+
+        return GraphNetFunctionFactory(**{k_:record[k_] for k_ in l})
+        
+
+
+
+
         
     def get_hash(self):
         import hashlib
@@ -56,6 +87,7 @@ class GraphNetFunctionFactory:
         NSamples = 100;
         #seq.add(Dense(n_gamma_internal, use_bias = True, activation = "relu", name = "output1"))
         seq.add(Dense(NParams*2, use_bias = False, activation = lambda x : tf.nn.softplus(x),name = "output"));
+        # Change that in the future to the _instantiate_gamma() version (out of class)
         def instantiate_gamma(t):
             return tfd.Gamma(concentration = t[...,0:NParams], rate = t[...,NParams:2*NParams])
 
@@ -104,9 +136,11 @@ class GraphNetFunctionFactory:
         self.graph_indep.save(gi_path)
     
     def load(self,path):
-        gi_path = os.path.join(path,"graph_independent")
-        core_path = os.path.join(path,"core")
-
+        self.gi_path = os.path.join(path,"graph_independent")
+        self.core_path = os.path.join(path,"core")
+        
+        self.core        = GraphNet.make_from_path(self.core_path)
+        self.graph_indep = GraphNet.make_from_path(self.gi_path)
 
     def make_edge_function_gi(self,n_edge_state_input = None, n_edge_state_output = None, n_node_state_input = None):
         # for graph independent.
@@ -154,11 +188,6 @@ class GraphNetFunctionFactory:
 
         return _out
 
-
-
-
-
-        
 
     def make_edge_aggregation_function(self,edge_out_shape):
         xin = tf.keras.layers.Input(shape = (None,edge_out_shape))
@@ -280,7 +309,7 @@ class GraphNetFunctionFactory:
         graph_indep = GraphNet(edge_function = edge_mlp_gi,
                                node_function = node_mlp_gi,
                                edge_aggregation_function= None, 
-                               node_to_prob_function= None)
+                               node_to_prob= None)
 
         #########################################
         # Graph processing:
@@ -302,18 +331,34 @@ class GraphNetFunctionFactory:
                       node_to_prob_function= node_to_prob_mlp)
         self.core = gn
         self.graph_indep = graph_indep
+
+    
         
-    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched"):
+    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = False):
         """
         graph_data_  : is a "graph" object that contains a batch of graphs (more correctly, a graph tuple as DM calls it)
         iterations   : number of core iterations for the computation.
+        return_distr_params : return the distribution parameters instead of the distribution itself. This is in place because of some buggy model loading (loaded models don't return distribution objects).
         """
         graph_out = self.graph_indep.graph_eval(graph_data_,eval_mode = eval_mode)
         for iterations in range(iterations):
             graph_out = self.core.graph_eval(graph_out, eval_mode = eval_mode) + graph_out # Addition adds all representations (look at implementation of "Graph")
 
         # Finally the node_to_prob returns a reparametrized "Gamma" distribution from only the final node state
-        return self.core.node_to_prob_function(graph_out.nodes[-1].node_attr_tensor) 
+        if not return_reparametrization:
+            return self.core.node_to_prob_function(graph_out.nodes[-1].node_attr_tensor)
+        else:
+            return self.core.node_to_prob_function.get_layer("output")(graph_out.nodes[-1].node_attr_tensor)
+
+    def set_weights(self,weights):
+        """
+        Takes a list of weights (as returned from a similar object)  and sets the to the functions of this one.
+        """
+        for w , new_weight in zip([*self.core.weights(), *self.graph_indep.weights()][:] , new_weights):
+            w = new_weight
+
+
+
 
 
 class GraphNet:
@@ -322,16 +367,26 @@ class GraphNet:
     Encapsulates a GraphNet computation iteration.
     
     Supports model loading and saving (for a single GraphNet)
+
+    Should treat the situations where edge functions do not exist more uniformly.
+    Also there is no Special treatment for "globals".
     """
-    def __init__(self, edge_function, node_function, edge_aggregation_function, node_to_prob_function):
+    def __init__(self, edge_function = None, node_function = None, edge_aggregation_function = None, node_to_prob= None):
         self.edge_function             = edge_function
         self.node_function             = node_function
         self.edge_aggregation_function = edge_aggregation_function        
-        self.node_to_prob_function = node_to_prob_function
+        self.node_to_prob_function = node_to_prob
         # Needed to treat the case of no edges.
         # If there are no edges, the aggregated edge state is zero.
         
-        self.edge_input_size = self.edge_function.inputs[0].shape[1] # first input of edge mlp is the edge state size by convention.
+        if self.edge_function is not None: # a messy hack:
+            self.edge_input_size = self.edge_function.inputs[0].shape[1] # first input of edge mlp is the edge state size by convention.
+
+    @staticmethod
+    def make_from_path(path):
+        graph_functions = GraphNet.load_graph_functions(path)
+        return GraphNet(**graph_functions)
+
         
     def weights(self):
         all_weights = [ *self.edge_function.weights, *self.node_function.weights]
@@ -416,7 +471,41 @@ class GraphNet:
                 d_ = os.path.join(path,label)
                 model_fcn.save(d_)
                 
+    @staticmethod
+    def load_graph_functions(path):
+        """
+        Returns a list of loaded graph functions.
+        """
+        function_rel_paths = ["node_function", "edge_aggregation_function", "edge_function", "node_to_prob"]
+        functions = {};
+
+        if not os.path.exists(path):
+            print("path does not exist.")
+            assert(0)
+            
+        avail_functions = os.listdir(path) # the path should have appropriately named folders that correspond to the diffferent graph functions. All are keras models.
+        for l in function_rel_paths:
+            d_ = os.path.join(path,l)
+            if not os.path.exists(d_):
+                print("path %s does not exist! Function %s will not be constructed."%(d_,l))
+                
+            else:
+                model_fcn = tf.keras.models.load_model(d_)
+
+                functions.update({l:model_fcn})
+
+                print("loading %s"%(d_))
+        return functions
+
+
+
+
     def load(self, path):
+        """
+        Load a model from disk. If the model is already initialized the current graphnet functions are simply overwritten. 
+        If the model is un-initialized, this is called from a static method (factory method) to make a new object with consistent properties.
+
+        """
         functions = [self.node_function, self.edge_aggregation_function, self.edge_function, self.node_to_prob_function]
         all_paths = ["node_function", "edge_aggregation_function", "edge_function", "node_to_prob"]
         path_label_to_function = {z:v for z,v in zip(all_paths,functions)}
@@ -428,11 +517,16 @@ class GraphNet:
             
         for l in path_labels:
             d_ = os.path.join(path,l)
-            if path is None:
+            if not os.path.exists(d_):
+                print("path %s does not exist! Function %s will not be constructed."%(d_,l))
                 next
             else:
                 model_fcn = tf.keras.models.load_model(d_)
                 path_label_to_function[l] = model_fcn
+                print(path_label_to_function[l] )
+
+                print("loading %s"%(d_))
+
             
     def eval_edge_functions(self,graph, eval_mode = "batched"):
         """

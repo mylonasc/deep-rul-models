@@ -1,4 +1,10 @@
 import numpy as np
+# This is code to create a sequence of observations from a random process that have the following properties:
+# * There is a latent variable (Z), stochastically evolving, which when it passes a certain threshold the process stops (at time tf).
+# * A signal X (some spikes overlapped over background signal) is related in a non-linear manner on the latent variable
+# * The dataset is created with the following ML task in mind:
+#   - to learn a model for tf-t (where t is the current time) only by sparse observations of "X" in a fully data-driven manner.
+#   - learn implicitly some representation of "Z" and how it evolves in time, as well as a model that gives an estimate of current "Z" given previous records of "X". 
 
 
 def lhs_sample(npoints, range_size = 10,  lranges=None):
