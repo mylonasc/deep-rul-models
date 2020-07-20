@@ -79,9 +79,9 @@ if __name__ == "__main__":
         
         pplot.figure(figsize = (15,10), dpi = 75)
         
-        nnodes_list = [1,2,10]
+        nnodes_list = [1,2,15]
         nseq_len = [100,100,200]
-        minspacing= [10,10,20]
+        minspacing= [10,10,10]
         gnsteps  = [ 5,5,5]
         
 
