@@ -15,7 +15,7 @@ def _instantiate_gamma(t, NParams_ = 1):
 
 class GraphNetFunctionFactory:
     def __init__(self, network_size_global= 50, use_prenetworks= True, edge_node_state_size= 15, graph_function_output_activation = "gated_tanh", 
-            n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, conv_block_activation_type = 'leaky_relu'):
+            n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, conv_block_activation_type = 'leaky_relu', channels_in = 2):
         """
         Summary: 
           A factory for graphnet functions. It is custom made for the problems of RUL from time-series. 
@@ -44,7 +44,8 @@ class GraphNetFunctionFactory:
                 'nfilts' : nfilts, 
                 'nfilts2' : nfilts2, 
                 'ksize': ksize ,
-                'activation_type' : conv_block_activation_type}
+                'activation_type' : conv_block_activation_type,
+                'channels_in' : channels_in}
 
     @staticmethod
     def make_from_record(record):
@@ -70,10 +71,6 @@ class GraphNetFunctionFactory:
         return GraphNetFunctionFactory(**{k_:record[k_] for k_ in l})
         
 
-
-
-
-        
     def get_hash(self):
         import hashlib
         return hashlib.md5(self.model_str.encode("utf-8"))
@@ -220,7 +217,7 @@ class GraphNetFunctionFactory:
 
 
 
-    def make_conv_input_head_node_function(self,edge_input_dummy_size , n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, output_size = None, use_dropout = True, activation_type = 'leaky_relu'):
+    def make_conv_input_head_node_function(self,edge_input_dummy_size , n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, output_size = None, use_dropout = True, activation_type = 'leaky_relu', channels_in = 2):
         """
         A simple 1D CNN for extracting features from the timeseries. It is used in the graph_independent graphnet block. 
         Each conv block is as such:
@@ -249,7 +246,7 @@ class GraphNetFunctionFactory:
         _activation = lambda: txt2act[activation_type]
 
 
-        xin_node_ts = tf.keras.Input(shape = (None, 2) , name = "timeseries_input"); 
+        xin_node_ts = tf.keras.Input(shape = (None, channels_in) , name = "timeseries_input"); 
         xin_edge_dummy = tf.keras.Input(shape = ( edge_input_dummy_size), name = "edge_input_dummy");
 
         def conv_block(conv_block_input, names_suffix= ""):
@@ -304,7 +301,7 @@ class GraphNetFunctionFactory:
         conv_head_params.update({'edge_input_dummy_size' : n_edge_state_input_gi, 'output_size' : n_node_state_input })
         node_mlp_gi = self.make_conv_input_head_node_function(**conv_head_params ) #edge_input_dummy_size=n_edge_state_input_gi, output_size = n_node_state_input)
 
-        node_mlp_gi([np.random.randn(batch_size,n_edge_state_input_gi),np.random.randn(batch_size,n_node_state_input_gi,2)])
+        node_mlp_gi([np.random.randn(batch_size,n_edge_state_input_gi),np.random.randn(batch_size,n_node_state_input_gi,self.cnn_params['channels_in'])])
         
         graph_indep = GraphNet(edge_function = edge_mlp_gi,
                                node_function = node_mlp_gi,
