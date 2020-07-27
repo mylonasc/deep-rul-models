@@ -185,7 +185,7 @@ class GraphNetFunctionFactory:
 
         return _out
 
-
+    @classmethod
     def make_edge_aggregation_function(self,edge_out_shape):
         xin = tf.keras.layers.Input(shape = (None,edge_out_shape))
         xout = tf.reduce_mean(xin,0)
@@ -331,15 +331,24 @@ class GraphNetFunctionFactory:
 
     
         
-    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = False):
+    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = False,return_intermediate_graphs = False):
         """
-        graph_data_  : is a "graph" object that contains a batch of graphs (more correctly, a graph tuple as DM calls it)
-        iterations   : number of core iterations for the computation.
-        return_distr_params : return the distribution parameters instead of the distribution itself. This is in place because of some buggy model loading (loaded models don't return distribution objects).
+        graph_data_                : is a "graph" object that contains a batch of graphs (more correctly, a graph tuple as DM calls it)
+        iterations                 : number of core iterations for the computation.
+        eval_mode                  : "batched" (batch nodes and edges before evaluation) or "safe" (more memory efficient - less prone to OOM errors no batching).
+        return_distr_params        : return the distribution parameters instead of the distribution itself. This is in place because of 
+                                     some buggy model loading (loaded models don't return distribution objects).
+        return_intermediate_graphs : Return all the intermediate computations.
         """
         graph_out = self.graph_indep.graph_eval(graph_data_,eval_mode = eval_mode)
+        intermediate_graphs = [];
         for iterations in range(iterations):
             graph_out = self.core.graph_eval(graph_out, eval_mode = eval_mode) + graph_out # Addition adds all representations (look at implementation of "Graph")
+            if return_intermediate_graphs:
+                intermediate_graphs.append(graph_out.copy())
+
+        if return_intermediate_graphs:
+            return intermediate_graphs
 
         # Finally the node_to_prob returns a reparametrized "Gamma" distribution from only the final node state
         if not return_reparametrization:

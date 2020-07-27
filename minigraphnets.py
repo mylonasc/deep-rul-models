@@ -1,4 +1,5 @@
 """ Classes for basic manipulation of GraphNet """
+import numpy as np
 
 class Node:
     def __init__(self, node_attr_tensor):
@@ -8,17 +9,23 @@ class Node:
         
     def get_state(self):
         return self.node_attr_tensor
+    
     def set_tensor(self, tensor):
         self.node_attr_tensor = tensor
         self.shape = self.shape = tensor.shape
         
     def copy(self):
-        node_attr_tensor = self.node_attr_tensor
+        if isinstance(self.node_attr_tensor , np.ndarray):
+            node_attr_tensor = self.node_attr_tensor.copy()
+        else:
+            node_attr_tensor = self.node_attr_tensor # if this is an eager tensor, the assignment copies the tensor.
+        return Node(node_attr_tensor)
 
     def __add__(self, n):
         return Node(self.node_attr_tensor + n.node_attr_tensor)
-    
-    
+
+    def __sub__(self, n):
+        return Node(self.node_attr_tensor  - n.node_attr_tensor)
     
 # My implementation relies on eager mode and all computation happens in place. In reality only nodes
 # and edges have data and the graph class is just for defining the computation between them.
@@ -36,7 +43,11 @@ class Edge:
         self.shape = edge_tensor.shape
     
     def copy(self, nodes_correspondence):
-        edge_tensor = self.edge_tensor
+        if isinstance(self.edge_tensor, np.ndarray):
+            edge_tensor = self.edge_tensor.numpy().copy()
+        else:
+            edge_tensor = self.edge_tensor # If this is an eager tensor, this a copy
+
         node_from = nodes_correspondence[self.node_from]
         node_to   = nodes_correspondence[self.node_to]
         return Edge(edge_tensor, node_from, node_to)
@@ -45,7 +56,7 @@ class Edge:
         print("Edge addition is not implemented!")
         assert(0)
         
-        
+
 class Graph:
     def __init__(self, nodes, edges):
         self.nodes = nodes
@@ -53,12 +64,16 @@ class Graph:
         
     def copy(self):
         # copy attributes of nodes and edges and re-create graph connectivity:
-        nodes_coppied = [Node(n.node_attr_tensor.copy()) for n in self.nodes]
+        nodes_coppied = [n.copy() for n in self.nodes]
         nodes_correspondence = {s:c for s , c in zip(self.nodes,nodes_coppied)}
         # Instantiate the new edges:
         coppied_edge_instances = []
         for e in self.edges:
-            enew = Edge(e.edge_tensor.copy(), nodes_correspondence[e.node_from], nodes_correspondence[e.node_to])
+            #if isinstance(e.edge_tensor, np.ndarray):
+            #    edge_val = e.edge_tensor.copy()
+            #else:
+            #    edge_val = e.edge_tensor
+            enew = e.copy(nodes_correspondence) #Edge(edge_val, nodes_correspondence[e.node_from], nodes_correspondence[e.node_to])
             coppied_edge_instances.append(enew)
         return Graph(nodes_coppied, coppied_edge_instances)
 
@@ -77,7 +92,3 @@ class Graph:
             added_edges.append(enew);
 
         return Graph(nodes, added_edges)
-
-
-
-        

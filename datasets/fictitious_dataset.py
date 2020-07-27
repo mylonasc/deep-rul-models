@@ -48,7 +48,7 @@ def add_disturbances_in_signal(ee, speed =50, npoints = 1000):
         vc = v.copy();
         random_segment_pos = lhs_sample(10,int(npoints/10)+1)
         for t_s,s in zip(random_segment_pos, seg):
-            vc[t_s:t_s+ndisturb_samples] += np.sin(t[t_s:t_s+ndisturb_samples]*speed*5)*(s/250+np.random.randn()/10)**2
+            vc[t_s:t_s+ndisturb_samples] += np.sin(t[t_s:t_s+ndisturb_samples]*speed*5)*(s/250+np.random.randn()/5)**2
 
             #vc[t_s:t_s+ndisturb_samples] += np.sin(t[t_s:t_s+ndisturb_samples]*speed*5)*(s/160+1)**2
 
