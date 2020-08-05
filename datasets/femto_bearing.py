@@ -33,7 +33,7 @@ class FEMTOBearingsDataset:
     """
     A class to manage the bearings dataset.
     """
-    def __init__(self, rootfolder_pickles = ROOTFOLDER_PICKLES, npz_file = DEFAULT_NPZ_FILE, from_npz = True):
+    def __init__(self, rootfolder_pickles = ROOTFOLDER_PICKLES, npz_file = DEFAULT_NPZ_FILE, from_npz = True, filter_from_end_time = np.inf):
 
         self.npz_file = npz_file
         # The files may not be available. The npz is usually used (faster).
@@ -82,15 +82,23 @@ class FEMTOBearingsDataset:
                 X__ = np.vstack(sensor_values_tot)
                 return yrem_tot, eid, X__
 
+
             self.yrem_s_raw, self.X, self.eid = load_bearings_dataset()
+
+        inds_filter = (self.yrem_s_raw < filter_from_end_time)
+        self.yrem_s_raw = self.yrem_s_raw[inds_filter]
+        self.X = self.X[inds_filter]
+        self.eid = self.eid[inds_filter]
 
         eid_oh = np.zeros([self.eid.shape[0],np.max(self.eid) + 1])
         for k in np.unique(self.eid):
             eid_oh[self.eid == k,k] = 1.;
 
+        
         self.eid_oh = eid_oh
 
         self.inds_exp_target,self.inds_exp_source = self.get_data_bearings_RUL()# call once with default parameters so the corresponding fields exist for further use.
+
 
     def get_dataset_config(self):
         return {'training_set' : self.inds_exp_source, 'validation_set' : self.inds_exp_target } 

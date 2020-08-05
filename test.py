@@ -52,6 +52,13 @@ class TestGraphNet(unittest.TestCase):
         e12 = Edge(np.random.randn(batch_size, edge_input_size),node_from = n1,node_to = n2)
         g = Graph([n1,n2],[e12])
 
+    def test_correct_sizes_graphnet_mlp(self):
+        """
+        Test sizes of intermediate computations when using a default MLP construction.
+        """
+        from graphnet_utils import GraphNet
+        
+
 
 
 if __name__ == "__main__":
