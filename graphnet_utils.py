@@ -10,6 +10,7 @@ import tensorflow.keras as keras
 
 import inspect
 
+
 def _instantiate_gamma(t, NParams_ = 1):
     return tfd.Gamma(concentration = t[...,0:NParams_], rate = t[...,NParams_:2*NParams_])
 
@@ -18,7 +19,7 @@ class GraphNetFunctionFactory:
             n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, conv_block_activation_type = 'leaky_relu', channels_in = 2):
         """
         Summary: 
-          A factory for graphnet functions. It is custom made for the problems of RUL from time-series. 
+          A factory for graphnet functions. It is custom-made for the problems of RUL from time-series. 
           It can be adapted to other prediction models. All models (except the aggregation function) are 
           relatively small MLPs terminated by sigmoid()*tanh() activation (simple tanh could also work).
           
@@ -40,12 +41,14 @@ class GraphNetFunctionFactory:
         self.model_constr_dict= str(inspect.getargvalues(inspect.currentframe()).locals)
         self.model_str = str(self.model_constr_dict)
         # Passed with other vargs on construction:
-        self.cnn_params = {'n_conv_blocks' : n_conv_blocks ,
+        self.cnn_params = {
+                'n_conv_blocks' : n_conv_blocks ,
                 'nfilts' : nfilts, 
                 'nfilts2' : nfilts2, 
                 'ksize': ksize ,
                 'activation_type' : conv_block_activation_type,
-                'channels_in' : channels_in}
+                'channels_in' : channels_in
+                }
 
     @staticmethod
     def make_from_record(record):
@@ -165,8 +168,6 @@ class GraphNetFunctionFactory:
                 output_size = n_edge_state_output) # Attention! Reads parameters from the factory class. Written for avoiding code repetition, not for clarity.
 
         edge_mlp = Model(inputs = edge_state_in,outputs = edge_out)
-
-        
         return edge_mlp
 
     def network_function_output(self,tensor_in,name_prefix = None, output_size = None): 
@@ -331,11 +332,11 @@ class GraphNetFunctionFactory:
 
     
         
-    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = False,return_intermediate_graphs = False):
+    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = False,return_final_node = False, return_intermediate_graphs = False, node_index_to_use = -1):
         """
         graph_data_                : is a "graph" object that contains a batch of graphs (more correctly, a graph tuple as DM calls it)
         iterations                 : number of core iterations for the computation.
-        eval_mode                  : "batched" (batch nodes and edges before evaluation) or "safe" (more memory efficient - less prone to OOM errors no batching).
+        eval_mode                  : "batched" (batch nodes and edges before evaluation) or "safe" (more memory efficient - less prone to OOM errors no batching).-
         return_distr_params        : return the distribution parameters instead of the distribution itself. This is in place because of 
                                      some buggy model loading (loaded models don't return distribution objects).
         return_intermediate_graphs : Return all the intermediate computations.
@@ -351,10 +352,40 @@ class GraphNetFunctionFactory:
             return intermediate_graphs
 
         # Finally the node_to_prob returns a reparametrized "Gamma" distribution from only the final node state
+        node_final = graph_out.nodes[node_index_to_use].node_attr_tensor
+        if return_final_node:
+            return node_final
+
         if not return_reparametrization:
-            return self.core.node_to_prob_function(graph_out.nodes[-1].node_attr_tensor)
+            return self.core.node_to_prob_function(node_final)
         else:
-            return self.core.node_to_prob_function.get_layer("output")(graph_out.nodes[-1].node_attr_tensor)
+            return self.core.node_to_prob_function.get_layer("output")(node_final)
+
+    def bootstrap_eval_graphnets(self, graph_data_, iterations = 5,n_bootstrap_samples = 1, n_nodes_keep = 5, eval_mode = "batched", return_final_node = False, node_index_to_use = -1):
+        """
+        Evaluate multiple random samples of nodes from the past. 
+        The signature is alsmost the same as `eval_graphnets` with the difference of the parameters n_boostrap_samples (how many times to resample the past nodes) and n_nodes_keep 
+        (how many nodes from the past to keep). The last node is always in the computed sample.
+        """
+        bootstrap_results = [];
+        for nbs in range(n_bootstrap_samples):
+
+            keep_nodes = [graph_data_.nodes[-1]]
+            node_indices = list(np.random.choice(len(graph_data_.nodes)-1,n_nodes_keep-1, replace = False))
+            node_indices.sort()
+            node_indices.append(len(graph_data_.nodes)-1)
+            subgraph = graph_data_.get_subgraph_from_nodes([graph_data_.nodes[i] for i in node_indices]) # are gradients passing?
+            bootstrap_result = self.eval_graphnets(subgraph, iterations = iterations, eval_mode = eval_mode, return_final_node = True, node_index_to_use = -1)
+            bootstrap_results.append(bootstrap_result)
+
+        if return_final_node is False:
+            bootstrap_node_value = tf.reduce_mean(bootstrap_results,0)
+            return self.core.node_to_prob_function(bootstrap_node_value)
+        else:
+            return bootstrap_results
+
+        return bootstrap_results
+          
 
     def set_weights(self,weights):
         """
@@ -377,21 +408,58 @@ class GraphNet:
     Should treat the situations where edge functions do not exist more uniformly.
     Also there is no Special treatment for "globals".
     """
-    def __init__(self, edge_function = None, node_function = None, edge_aggregation_function = None, node_to_prob= None):
+    def __init__(self, edge_function = None, node_function = None, edge_aggregation_function = None, segment_indexed_edge_aggregation_function = None, node_to_prob= None, graph_independent = False):
+        """
+        parameters:
+            edge_function             : the edge function (depending on whether the graphnet block is graph 
+                                        independent, and whether the source and destinations are used,
+                                        this has different input sizes)
+            node_function             : the node function (if this is graph independent it has only node inputs)
+            edge_aggregation_function : the edge aggregation function used in the non-fully batched evaluation 
+                                        modes. ("batched" and "safe")
+           segment_indexed_edge_aggregation_function : An edge aggregation function that uses segment indexing
+                                        for better performance while performing batched computation (the edges 
+                                        are not explicitly iterated for aggregation). This is used when 
+                                        working with GraphTuples (as compared to single "graph" objects that 
+                                        have graphs with the same connectivity in each batch).
+           node_to_prob               : the function that takes the final graph and returns a 
+
+        """
+        self.segment_indexed_edge_aggregation_function = segment_indexed_edge_aggregation_function
         self.edge_function             = edge_function
         self.node_function             = node_function
         self.edge_aggregation_function = edge_aggregation_function        
         self.node_to_prob_function = node_to_prob
+        self.graph_independent = graph_independent
         # Needed to treat the case of no edges.
         # If there are no edges, the aggregated edge state is zero.
         
         if self.edge_function is not None: # a messy hack:
-            self.edge_input_size = self.edge_function.inputs[0].shape[1] # first input of edge mlp is the edge state size by convention.
+            self.edge_input_size = self.edge_function.inputs[0].shape[1] # input dimension 1 of edge mlp is the edge state size by convention.
 
     @staticmethod
     def make_from_path(path):
         graph_functions = GraphNet.load_graph_functions(path)
         return GraphNet(**graph_functions)
+
+
+    def get_graphnet_input_shapes(self):
+        result = {}
+        if self.edge_function is not None:
+            result.update({"edge_function"  : [i.shape for i in self.edge_function.inputs]})
+        result.update({"node_function":[i.shape for i in self.node_function.inputs]})
+        return result
+
+    def get_graphnet_output_shapes(self):
+        result = {}
+        if self.edge_function is not None:
+            result.update({"edge_function"  : [i.shape for i in self.edge_function.outputs]})
+        result.update({"node_function":[i.shape for i in self.node_function.outputs]})
+        return result
+
+    def get_graphnet_output_shapes(self):
+        return [i.shape for i in self.edge_function.outputs] , [i.shape for i in self.node_function.outputs]
+
 
         
     def weights(self):
@@ -414,6 +482,22 @@ class GraphNet:
     def observe_node(self, node):
         self.node_to_prob_function(node)
 
+    def eval_graph_tuple(self, graph_tuple):
+        edges = self.edge_function(graph_tuple.edges)
+        nodes = self.node_function(graph_tuple.nodes)
+    def __call__(self, graph):
+        return self.graph_eval(graph)
+
+    def graph_tuple_eval(self,tf_graph_tuple):
+        # This method parallels what the deepmind library does for faster batched computation. 
+        # The `tf_graph_tuple` contains edge, nodes, n_edges, n_nodes, senders (indices), receivers (indices).
+        # * the "edges" and "nodes" are already stacked into a tensor
+        # * If .from_node or .to_node tensors are needed for the edge computations they are gathered according to the senders and receivers tensors.
+        # * the edge function is applied to edges
+        # * the edge function outputs are aggregated according to the "receivers" tensor to yield the messages.
+        # 
+        None
+
     def graph_eval(self, graph, eval_mode = "batched"):
         # Evaluate all edge functions:
         self.eval_edge_functions(graph, eval_mode = eval_mode)
@@ -428,10 +512,12 @@ class GraphNet:
         # Compute the edge-aggregated messages:
         edge_agg_messages_batch = []
         node_agg_messages_batch = []
-        for n in graph.nodes:
+        for n in graph.nodes: # this explicit iteration is expensive and unnecessary in most cases. The DM approach (graph tuples) seems better - do that.
             if len(n.incoming_edges) is not 0:
                 if self.edge_aggregation_function is not None:
+                    #print([e.edge_tensor for e in n.incoming_edges])
                     edge_vals_ = tf.stack([e.edge_tensor for e in n.incoming_edges])
+                    #print(edge_vals)
                     edge_to_node_agg = self.edge_aggregation_function(edge_vals_)
                 else:
                     edge_to_node_agg = edge_to_node_agg_dummy
@@ -440,31 +526,43 @@ class GraphNet:
 
             #Inside the loop!
             if eval_mode == 'safe':
-                node_attr_tensor = self.node_function([edge_to_node_agg, n.node_attr_tensor])
-                n.set_tensor(node_attr_tensor)
+                if self.graph_independent:
+                    node_attr_tensor = self.node_function([n.node_attr_tensor])
+                    n.set_tensor(node_attr_tensor)
+                else:
+                    node_attr_tensor = self.node_function([edge_to_node_agg, n.node_attr_tensor])
+                    n.set_tensor(node_attr_tensor)
 
             if eval_mode == 'batched':
                 edge_agg_messages_batch.append(edge_to_node_agg)
                 node_agg_messages_batch.append(n.node_attr_tensor)
 
         if eval_mode == 'batched':
-            node_function = self.node_function
+            # If we compute in batched mode, there is some reshaping to be done in the end.
             node_input_shape = graph.nodes[0].shape # nodes and edges (therefore graphs as well) could contain multiple datapoints. This is to treat this case.
             node_output_shape =self.node_function.output.shape
 
             nodes_agg_messages_concat = tf.concat(node_agg_messages_batch,axis = 0)
             edges_agg_messages_concat = tf.concat(edge_agg_messages_batch, axis = 0)
-            batch_res = self.node_function([edges_agg_messages_concat, nodes_agg_messages_concat])
 
-            unstacked = tf.unstack(tf.reshape(batch_res,[-1,*node_input_shape[0:1],*node_output_shape[1:]]), axis = 0)
+
+            if self.graph_independent:
+                batch_res = self.node_function(
+                        [nodes_agg_messages_concat])
+
+            else:
+                batch_res = self.node_function(
+                        [edges_agg_messages_concat, nodes_agg_messages_concat])
+
+            unstacked = tf.unstack(
+                    tf.reshape(
+                        batch_res,[-1,*node_input_shape[0:1],*node_output_shape[1:]]), axis = 0
+                    )
             for n, nvalue in zip(graph.nodes, unstacked):
                 n.set_tensor(nvalue)
 
         return graph
 
-
-
-        
     def save(self, path):
         functions = [self.node_function, self.edge_aggregation_function, self.edge_function, self.node_to_prob_function]
         path_labels = ["node_function", "edge_aggregation_function", "edge_function", "node_to_prob"]
@@ -547,7 +645,7 @@ class GraphNet:
         if len(graph.edges) == 0:
             return 
         
-        if self.edge_aggregation_function is None: # this happens in graph-independent networks (there is no aggregation)
+        if self.edge_aggregation_function is None: # this happens in graph-independent networks (there is no aggregation and no message passing)
             if eval_mode == 'safe':
                 for edge in graph.edges:
                     edge_tensor = self.edge_function([edge.edge_tensor])
@@ -586,6 +684,124 @@ class GraphNet:
                 for e, evalue in zip(edges_, unstacked):
                     e.set_tensor(evalue)
 
-
-           
                 
+def make_mlp(units, input_tensor_list , output_shape):
+    """
+    A default method for making a small MLP:
+    """
+    if len(input_tensor_list) > 1:
+        edge_function_input = keras.layers.concatenate(input_tensor_list);
+    else:
+        edge_function_input = input_tensor_list[0] #essentialy a list of a single tensor.
+    #print(units, edge_function_input)
+
+    y = Dense(units)(  edge_function_input)
+    y=  Dropout(rate = 0.2)(y)
+    y = Dense(units, activation = "relu")(y)
+    y=  Dropout(rate = 0.2)(y)
+    y = Dense(units, activation = "relu")(y)
+    y = Dense(output_shape[0])(y)
+    return tf.keras.Model(inputs = input_tensor_list, outputs = y)
+
+
+def make_node_mlp(units,
+        edge_state_input_shape = None,
+        node_state_input_shape = None, 
+        node_emb_size= None,
+        graph_indep = False):
+
+    node_state_in = Input(shape = node_state_input_shape, name = "node_state");
+
+    if graph_indep:
+        return make_mlp(units, [node_state_in], node_emb_size)
+
+    if not graph_indep:
+        agg_edge_state_in = Input(shape = edge_state_input_shape, name = "edge_state_agg");
+        return make_mlp(units, [agg_edge_state_in, node_state_in],node_emb_size)
+
+
+def make_edge_mlp(units,
+        edge_state_input_shape = None,
+        edge_state_output_shape = None, 
+        sender_node_state_output_shape = None,
+        receiver_node_state_shape = None,
+        edge_output_state_size = None,
+        use_edge_state = True,
+        use_sender_out_state = True,
+        use_receiver_state = True,
+        graph_indep = False):
+    """
+    When this is a graph independent edge function, the input is different: 
+    The node states from the sender and receiver are not used!
+    """
+    tensor_in_list = []
+    if use_edge_state:
+        edge_state_in = Input(
+                shape = edge_state_input_shape, name = "edge_state");
+        tensor_in_list.append(edge_state_in)
+
+    if use_sender_out_state:
+        node_state_sender_out = Input(
+                shape = sender_node_state_output_shape, name = "sender_node_state");
+        tensor_in_list.append(node_state_sender_out)
+
+    if use_receiver_state:
+        node_state_receiver_in = Input(
+                shape = receiver_node_state_shape, name = "receiver_node_state");
+
+    if graph_indep:
+        try:
+            assert(use_sender_out_state is False)
+            assert(use_receiver_out_state is False)
+        except:
+            ValueError("The receiver and sender nodes for graph-independent blocks should not be used! It was attempted to create an edge function for a graph-indep. block containing receiver and sender states as inputs.")
+        ## Building the edge MLP:
+        tensor_input_list = [edge_state_in]
+        return make_mlp(units,tensor_input_list,edge_output_state_size )  
+    else:
+        ## Building the edge MLP:
+        return make_mlp(units,tensor_in_list,edge_output_state_size )  
+
+def make_mean_agg(input_size):
+    """
+    For consistency I'm making this a keras model as well.
+    """
+    x = Input(shape = input_size)
+    y = tf.reduce_mean(x,0)
+    return tf.keras.Model(inputs = x, outputs = y)
+
+def make_mlp_graphnet_functions(units,
+        input_size, output_size, 
+        graph_indep = False, message_size = None):
+    """
+    Make the 3 functions that define the graph (no Nodes to Global and Edges to Global)
+    It is assumed that all inputs and all outputs are the same size for nodes and edges.
+    """
+    edge_input = input_size
+    node_input = input_size
+    edge_output = output_size
+    node_output = output_size
+    if message_size is None:
+        message_size = output_size
+
+    edge_mlp_args = {"edge_state_input_shape" : (edge_input,),
+            "edge_state_output_shape" : (message_size,),
+            "sender_node_state_output_shape" : (node_input,), # this has to be compatible with the output of the aggregator.
+            "edge_output_state_size":(edge_output,),
+            "receiver_node_state_shape" : (node_input,)} 
+    edge_mlp_args.update({"graph_indep" : graph_indep})
+    edge_mlp = make_edge_mlp(units, **edge_mlp_args)
+
+    if not graph_indep:
+        agg_fcn  = make_mean_agg([None, *edge_mlp.outputs[0].shape[1:]]) # First dimension - incoming edge index
+    else:
+        #edge_mlp = None
+        agg_fcn = None
+
+    node_mlp_args = {"edge_state_input_shape": (input_size,),
+            "node_state_input_shape" : (input_size,),
+            "node_emb_size" : (output_size,)}
+    node_mlp_args.update({"graph_indep" : graph_indep})
+
+    node_mlp = make_node_mlp(units, **node_mlp_args)
+    return {"edge_function" : edge_mlp, "node_function": node_mlp, "edge_aggregation_function": agg_fcn} # Can be passed directly  to the GraphNet construction with **kwargs

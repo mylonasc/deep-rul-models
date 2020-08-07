@@ -1,5 +1,7 @@
 """ Classes for basic manipulation of GraphNet """
 import numpy as np
+import tensorflow as tf
+
 
 class Node:
     def __init__(self, node_attr_tensor):
@@ -68,6 +70,34 @@ class Graph:
         if not NO_VALIDATION:
             self.validate_graph()
 
+
+    def is_equal_by_value(self,g2):
+        """
+        Checks if the graphs have the same values for node and edge attributes
+        """
+        is_equal = True
+        for n1,n2 in zip(self.nodes, g2.nodes):
+            is_equal = is_equal and tf.reduce_all(n1.node_attr_tensor == n2.node_attr_tensor)
+
+        for e1, e2 in zip(self.edges, g2.edges):
+            is_equal = is_equal and tf.reduce_all(e1.edge_tensor== e2.edge_tensor)
+        
+        return bool(is_equal)
+    
+    def compare_connectivity(self,g2):
+        """
+        Checks if the connectivity of two graphs is the same.
+        """
+        g1 = self
+        nodes_from_match = [(g1.nodes.index(e1.node_from) == g2.nodes.index(e2.node_from)) for e1,e2 in zip(g1.edges,g2.edges)]
+        nodes_to_match = [(g1.nodes.index(e1.node_to) == g2.nodes.index(e2.node_to)) for e1,e2 in zip(g1.edges,g2.edges)]
+        all_matching = True
+        for matches in [*nodes_from_match, *nodes_to_match]:
+            all_matching = all_matching and matches
+        return all_matching
+
+
+
     @staticmethod
     def validate_graph(self):
 
@@ -131,29 +161,85 @@ class Graph:
         return Graph(nodes, added_edges)
 
 
+
+def make_graph_tuple_from_graph_list(list_of_graphs):
+    """
+    Takes in a list of graphs (with consistent sizes - not checked)
+    and creates a graph tuple (input tensors + some book keeping)
+    
+    Because there is some initial functionality I don't want to throw away currently, that implements special treatment for nodes and edges
+    coming from graphs with the same topology, it is currently required that the first dimension of nodes and edges
+    for the list of graphs that are entered in this function is always 1 (this dimension is the batch dimension in the previous implementation.)
+    """
+    # graph_id = [id_ for id_, dummy in enumerate(list_of_graphs)]
+    all_edges, all_nodes, n_nodes,n_edges =[[],[],[],[]]
+    for g in list_of_graphs:
+        all_edges.extend(g.edges)
+        all_nodes.extend(g.nodes)
+        n_nodes.append(len(g.nodes)) 
+        n_edges.append(len(g.edges)) 
+    
+    edge_attr_tensor, nodes_attr_tensor, senders, receivers = [[],[],[],[]];
+    for e in all_edges:
+        edge_attr_tensor.append(e.edge_tensor)
+        senders.append(all_nodes.index(e.node_from))
+        receivers.append(all_nodes.index(e.node_to))
+        
+        #senders.append(e.node_from.find(gin.nodes))
+        #receivers.append(e.node_to.find(gin.nodes))
+    
+    for n in all_nodes:
+        nodes_attr_tensor.append(n.node_attr_tensor)
+    
+    edges_attr_stacked = tf.stack(edge_attr_tensor,0)
+    nodes_attr_stacked = tf.stack(nodes_attr_tensor,0)
+    return GraphTuple(nodes_attr_stacked, edges_attr_stacked,senders, receivers, n_nodes, n_edges)# , graph_id)
+
+
 class GraphTuple:
-    def __init__(self, graphs):
+    def __init__(self, nodes, edges,senders,receivers, n_nodes, n_edges, sort_receivers_to_edges  = False):
         """
-        A class encapsulating computation with arbitrary graphs in one batch.
-        This is faster as the edges and nodes for different graphs are evaluated in parallel.
-        Each graph in the tuple takes an index and this index is used to keep the correspondence of edges and nodes to the graph.
-        Computation steps:
-        --------------------
-        (1) computing edges:
-        ---[edges graph1][edges graph2][...     ...]----
-        ---[graph1 index][graph2 index][...     ...]---- <- this is used for book keeping
-        ---[... total batch of edges to be computed]---- <- batch of computation
-
-        (2) Aggregating edges:
-            *
-        (3) computing nodes:
-        ---[nodes graph1][nodes graph2][...     ...]----
-        ---[graph1 index][graph2 index][...     ...]---- <- this is used for book keeping
-        ---[... total batch of nodes to be computed]---- <- batch of computation
-
-        *aggregating edges:
-
+        A graph tuple contains multiple graphs for faster batched computation. 
+        
+        parameters:
+            nodes      : a `tf.Tensor` containing all the node attributes
+            edges      : a `tf.Tensor` containing all the edge attributes
+            senders    : a list of sender node indices defining the graph connectivity. The indices are unique accross graphs
+            receivers  : a list of receiver node indices defining the graph connectivity. The indices are unique accross graphs
+            n_nodes    : a list, a numpy array or a tf.Tensor containing how many nodes are in each graph represented by the nodes and edges in the object
+            n_edges    : a list,a numpy array or a tf.Tensor containing how many edges are in each graph represented by the nodes and edges in the object
+            sort_receivers :  whether to sort the edges on construction, allowing for not needing to sort the output of the node receiver aggregators.
         """
-        self.graphs = graphs
+        # Sort edges according to receivers and sort receivers:
+        assert(len(n_nodes) == len(n_edges))
+        
+        self.nodes = nodes # floats tensor
+        self.edges = edges # floats tensor
+        self.senders = senders     # integers
+        self.receivers = receivers # integers
+        self.n_nodes = n_nodes     # integers
+        self.n_edges = n_edges     # integers
+        self.n_graphs = len(self.n_nodes)
+        
+    def get_graph(self, graph_index):
+        """
+        Returns a new graph with the same properties as the original  graph.
+        gradients are not traced through this operation.
+        """
+        assert(graph_index >=0 )
+        if graph_index > self.n_graphs:
+            raise ValueError("The provided index is larger than the available graphs in this GraphTuple object.")
+            
+        get_start_stop_index = lambda sizes_list, index : np.cumsum([0,*sizes_list[0:index+1]])[-2:]
+        start_idx_nodes , end_idx_nodes = get_start_stop_index(self.n_nodes, graph_index)
+        start_idx_edges , end_idx_edges = get_start_stop_index(self.n_edges, graph_index)
+        nodes_attrs = self.nodes[start_idx_nodes:end_idx_nodes]
+        senders, receivers, edge_attr = [v[start_idx_edges:end_idx_edges] for v in [self.senders, self.receivers,self.edges]]
+        senders = senders-start_idx_nodes
+        receivers = receivers - start_idx_nodes
+        nodes = [Node(node_attr) for node_attr in nodes_attrs]
+        edges = [Edge(edge_attr_tensor, nodes[node_from_idx], nodes[node_to_idx]) for edge_attr_tensor, node_from_idx, node_to_idx in zip(edge_attr, senders,receivers)]
+        return Graph(nodes, edges)
 
+        
 

@@ -7,8 +7,8 @@ import tqdm
 
 def sample_graph_from_2d_result(points, all_vals_, pct_x = 10, pct_y = 10, cutoff = 0.5):
     u = np.random.uniform(all_vals_) # split data randomly and exclusively in two sets (source and target datapoints)
-    my = (u <= (pct_x/100 + pct_y/100)) * (u>pct_x/100)
-    mx = (u <= (pct_x/100 + pct_y/100)  * (u<=pct_x/100))
+    my = (u <=  (pct_x/100 + pct_y/100)) * (u>pct_x/100)
+    mx = (u <= (pct_x/100 + pct_y/100))  * (u<=pct_x/100)
     
     points_x , points_y= [points[m_] for m_ in [mx,my]]
     vals_x, vals_y = [all_vals_[m_] for m_ in [mx, my]]
@@ -21,8 +21,11 @@ def sample_graph_from_2d_result(points, all_vals_, pct_x = 10, pct_y = 10, cutof
     all_edges = []
     
     all_nodes_output = []
+    tot_point_positions = []
     for p1, source_node_val in zip(points_x, vals_x):
         source_node = Node(np.array([[source_node_val]]))
+        tot_point_positions.append(p1)
+        all_nodes_output.append(source_node)
         all_nodes.append(source_node)
         # Make bi-directional edges for the points that are observed:
         for p2, dest_node_val in zip(points_x, vals_x):
@@ -31,6 +34,7 @@ def sample_graph_from_2d_result(points, all_vals_, pct_x = 10, pct_y = 10, cutof
                 
                 all_nodes.append(dest_node)
                 all_nodes_output.append(dest_node)
+                tot_point_positions.append(p2)
                 
                 
                 d = np.array([[np.sum((p1 - p2)**2)]])
@@ -42,6 +46,7 @@ def sample_graph_from_2d_result(points, all_vals_, pct_x = 10, pct_y = 10, cutof
             if np.linalg.norm(p2 - p1) < cutoff:
                 dest_node_input = Node(np.array([[dest_node_val * 0]]))
                 dest_node_output = Node(np.array([[dest_node_val]]))
+                tot_point_positions.append(p2)
                 
                 all_nodes.append(dest_node_input)
                 all_nodes_output.append(dest_node_output)
@@ -51,7 +56,7 @@ def sample_graph_from_2d_result(points, all_vals_, pct_x = 10, pct_y = 10, cutof
             
     input_graph = Graph( all_nodes, all_edges)
     output_graph = Graph( all_nodes_output, [])
-    return input_graph, output_graph
+    return input_graph, output_graph, tot_point_positions
 
 
 class ExpQuadKernel:
@@ -96,20 +101,24 @@ def get_multiple_graph_samples_random_fields(nsamples, vals, all_points, pct_obs
     
     input_graphs = []
     output_graphs = []
+    node_pos = []
     for v in vals:
         for sample in range(nsamples):
-            in_graph, out_graph = sample_graph_from_2d_result(all_points, v,pct_x = pct_observed, pct_y = pct_unobserved, cutoff = cutoff)
+            in_graph, out_graph , node_positions = sample_graph_from_2d_result(all_points, v,pct_x = pct_observed, pct_y = pct_unobserved, cutoff = cutoff)
             input_graphs.append(in_graph)
             output_graphs.append(out_graph)
+            node_pos.append(node_positions)
         print(".\r")
 
 
 
-    return input_graphs, output_graphs # 
+    return input_graphs, output_graphs , node_pos
 
 import tensorflow.keras as keras
 from tensorflow.keras.layers import Dense, Dropout, Input
 import tensorflow as tf
+
+import matplotlib.pyplot as pplot
 
 
 if __name__ == "__main__":
@@ -131,8 +140,35 @@ if __name__ == "__main__":
         all_vals.append(vals) #vals.reshape(xx.shape))
 
     # samples a single graph from 1 of the sampled random fields:
-    in_graph , out_graph = sample_graph_from_2d_result(points, all_vals[0])
+    # in_graph , out_graph = sample_graph_from_2d_result(points, all_vals[0])
     input_graphs, output_graphs  = get_multiple_graph_samples_random_fields(5,all_vals,points)
-    #[len(e.edges) for e in input_graphs]
+
+    #graph_state_size = (10,);
+    graph_state_size = 32;
+    units = 32
+
+    qoi_size = 1; # dimension of the random field.
+
+    functions_encode = make_mlp_graphnet_functions(units,input_size=qui_size, output_size=graph_state_size, graph_indep=True)
+    functions_core   = make_mlp_graphnet_functions(units, input_size = graph_state_size,output_size = graph_state_size)
+    functions_decode = make_mlp_graphnet_functions(units ,input_size = graph_state_size,output_size=1, graph_indep = True)
+
+    gn_encode = GraphNet(**functions_encode)
+    gn_process = GraphNet(**functions_core)
+    gn_decode = GraphNet(**functions_decode)
+
+    def eval_network(graph, core_iterations = 3, residual = True, eval_mode = "batched"):
+        g = gn_encode.graph_eval(graph.copy(), eval_mode = eval_mode)
+        for k in range(core_iterations):
+            if residual:
+                g = g + gn_process.graph_eval(g, eval_mode= eval_mode)
+            else:
+                g = gn_process.graph_eval(g, eval_mode = eval_mode)
+                
+        return gn_decode.graph_eval(g, eval_mode = eval_mode)
+
+    res = eval_network(input_graphs[0])
+
+    ## train the network (deterministic)
 
 
