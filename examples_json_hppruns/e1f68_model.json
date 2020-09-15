@@ -1,0 +1,11 @@
+{
+    "network_size_global": 15,
+    "edge_node_state_size": 100,
+    "use_prenetworks": true,
+    "graph_function_output_activation": "relu",
+    "n_conv_blocks": 3,
+    "nfilts2": 50,
+    "nfilts": 18,
+    "ksize": 3,
+    "conv_block_activation_type": "leaky_relu"
+}
