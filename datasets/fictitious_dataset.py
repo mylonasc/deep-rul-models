@@ -34,7 +34,7 @@ def add_disturbances_in_signal(ee, speed =50, npoints = 1000):
      # a parameter in order to make the problem a bit more difficult.
     t = np.linspace(0,2*np.pi,npoints); # segment time
 
-    v = np.sin(t*speed)*0.1 + np.random.randn(t.shape[0])*0.0
+    v = np.sin(t*speed)*0.1 + np.random.randn(t.shape[0])*0.05
     
     #ndist_samples = 10
     ndisturb_samples = 20
@@ -66,6 +66,7 @@ def get_signal_for_segments(exp_dat_, speed, rr = 10):
 
 def get_dat(d, rr = 10):
     """
+    NOT USED - Maybe remove?
     Transforms the latent values to a timeseries segment. 
     
     The timeseries segment is used for prediction. The "case" input parameter contains the information of which loading case we are producing data from.
