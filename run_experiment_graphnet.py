@@ -124,40 +124,49 @@ def train(gn_tot, dataset,training_options):
 
 
 if __name__ == "__main__":
-    rundf_path = os.path.join("models","runs_dataframe")
+    rundf_path = os.path.join("models_sept20_runs","runs_dataframe")
     femto_dataset = FEMTOBearingsDataset()
     inds_exp_target, inds_exp_source = [femto_dataset.inds_exp_target, femto_dataset.inds_exp_source]
 
-    network_size_global = int(sys.argv[1])
-    graphstate_size = int(sys.argv[2])
-    gn_fn_output_activation = sys.argv[3]
-
-    if len(sys.argv)>4:
-        n_conv_blocks = sys.argv[4]
-        nfilts = sys.argv[5]
-        nfilts2 = sys.argv[6]
-        ksize = sys.argv[7]
-        conv_block_activation_type = 'leaky_relu'
+    if sys.argv[1] == '--from-model-json':
+        json_file = sys.argv[2]
+        import json
+        with open(json_file,'r') as f:
+            model_options = json.loads(f.read())
+            f.close()
     else:
-        n_conv_blocks = 3
-        nfilts2 = 50
-        nfilts = 18
-        ksize = 3
-        conv_block_activation_type = 'leaky_relu'
 
-    experiment_metadata = {"hpr_id" : "1", "description" : "larger graph-states seem to help. The best runs seemed to be with width parameter only 15! Investigating now the effect of CNN parameters."}
+        network_size_global = int(sys.argv[1])
+        graphstate_size = int(sys.argv[2])
+        gn_fn_output_activation = sys.argv[3]
 
-    model_options = {'network_size_global' : network_size_global, 
-                     'edge_node_state_size' : graphstate_size, 
-                     'use_prenetworks' : True,
-                     'graph_function_output_activation' : gn_fn_output_activation}
+        if len(sys.argv)>4:
+            n_conv_blocks = sys.argv[4]
+            nfilts = sys.argv[5]
+            nfilts2 = sys.argv[6]
+            ksize = sys.argv[7]
+            conv_block_activation_type = 'leaky_relu'
+        else:
+            n_conv_blocks = 3
+            nfilts2 = 50
+            nfilts = 18
+            ksize = 3
+            conv_block_activation_type = 'leaky_relu'
 
-    model_options.update( {'n_conv_blocks' : int(n_conv_blocks) ,
-                'nfilts' : int(nfilts), 
-                'nfilts2' : int(nfilts2), 
-                'ksize': int(ksize) ,
-                'conv_block_activation_type' : conv_block_activation_type})
-    print(model_options)
+        experiment_metadata = {"hpr_id" : "1", "description" : "larger graph-states seem to help. The best runs seemed to be with width parameter only 15! Investigating now the effect of CNN parameters."}
+
+        model_options = {'network_size_global' : network_size_global, 
+                         'edge_node_state_size' : graphstate_size, 
+                         'use_prenetworks' : True,
+                         'graph_function_output_activation' : gn_fn_output_activation}
+
+        model_options.update( {'n_conv_blocks' : int(n_conv_blocks) ,
+                    'nfilts' : int(nfilts), 
+                    'nfilts2' : int(nfilts2), 
+                    'ksize': int(ksize) ,
+                    'conv_block_activation_type' : conv_block_activation_type})
+        print(model_options)
+
 
 
     dataset_options = femto_dataset.get_dataset_config()
@@ -170,6 +179,20 @@ if __name__ == "__main__":
                         'epochs':300,
                         'batch' : 150,
                         'rand_seed' : 42}
+    if sys.argv[3] == '--training-options-json':
+        training_options_json = sys.argv[4]
+
+#    best_training_options = {'learning_rate' : 0.001,
+#                        'schedule_nnodes' :  [1,2,5],
+#                        'schedule_min_sep': [10, 20],
+#                        'nseq_length' : [100],
+#                        'iterations_schedule' : [5],
+#                        'epochs':300,
+#                        'batch' : 300,
+#                        'rand_seed' : 42}
+        with open(training_options_json,'r') as f:
+            training_options = json.loads(f.read())
+
     
 
 
