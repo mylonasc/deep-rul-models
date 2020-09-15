@@ -1,0 +1,1 @@
+{"learning_rate": 0.001, "schedule_nnodes": [1, 2, 5], "schedule_min_sep": [10, 20], "nseq_length": [100], "iterations_schedule": [5], "epochs": 300, "batch": 300, "rand_seed": 42}
