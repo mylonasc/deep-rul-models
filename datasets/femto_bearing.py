@@ -26,6 +26,9 @@ except:
 if HOSTNAME == 'marvin':
     ROOTFOLDER_PICKLES = '/mnt/860EVO_1TB/Dataset/bearing_fatigue_dataset/'
     DEFAULT_NPZ_FILE ='/mnt/860EVO_1TB/Dataset/bearing_fatigue_dataset/first_stage_preproc_bearings.npz'
+    file_suffixes = ['2_7', '1_7', '3_2', '3_1', '1_2', '1_3', '1_5', '2_3', '1_4', '2_5', '2_6', '3_3', '2_2', '2_1', '2_4', '1_1', '1_5']
+    DEFAULT_NPZ_FILE ='/mnt/860EVO_1TB/Dataset/bearing_fatigue_dataset/first_stage_preproc_bearings_v2.npz'
+    file_suffixes = ['1_1','1_2', '1_3', '1_4', '1_5', '1_6', '1_7', '2_1', '2_2', '2_3', '2_4', '2_5', '2_6', '2_7', '3_1', '3_2', '3_3']
 
 
 
@@ -37,19 +40,16 @@ class FEMTOBearingsDataset:
 
         self.npz_file = npz_file
         # The files may not be available. The npz is usually used (faster).
-        self.all_files = ['AccB_1_6.pickle', 'AccB_2_2.pickle', 
-                'AccB_2_5.pickle', 'AccB_2_4.pickle', 
-                'AccB_2_6.pickle', 'AccB_1_1.pickle', 
-                'AccB_2_7.pickle', 'AccB_1_5.pickle', 
-                'AccB_3_2.pickle', 'AccB_2_1.pickle', 
-                'AccB_3_1.pickle', 'AccB_2_3.pickle', 
-                'AccB_3_3.pickle', 'AccB_1_7.pickle', 
-                'AccB_1_2.pickle', 'AccB_1_4.pickle', 
-                'AccB_1_3.pickle'] #[f for f in os.listdir(rootfolder_pickles) if 'pickle' in f]
+        self.file_suffix = file_suffixes 
+        self.eid_index_to_cond_dict = {k:int(self.file_suffix[k][0]) for k in range(0,len(self.file_suffix))}
+        self.all_files = ['Full_%s.pickle'%k for k in self.file_suffix]
         if from_npz:
             L = np.load(self.npz_file)
-            self.yrem_s_raw, self.X, self.eid = [L[l] for l in L.files]
+            self.yrem_s_raw, self.eid, self.X = [L[l] for l in L.files]
         else:
+            print("Don't use this part of the code before more testing! - failing to load.")
+            assert(0)
+            
             self.rootfolder = rootfolder_pickles
 
             def load_bearings_dataset(all_files = self.all_files):
@@ -103,6 +103,10 @@ class FEMTOBearingsDataset:
     def get_dataset_config(self):
         return {'training_set' : self.inds_exp_source, 'validation_set' : self.inds_exp_target } 
 
+    def set_dataset_config(self, dataset_options):
+        self.inds_exp_source = dataset_options['training_set']
+        self.inds_exp_target = dataset_options['validation_set']
+
 
 
     def get_data_bearings_RUL(self,min_samples_keep = 910,
@@ -124,11 +128,14 @@ class FEMTOBearingsDataset:
         yrem_norm[yrem_norm<yrem_norm_thresh] = yrem_norm_thresh # For numerical reasons - otherwise NaNs occur.
         self.yrem_norm = yrem_norm
 
-        conds_flag_source = [0,0,0,0,   1,1, 1,1,  2,2]
+        #conds_flag_source = [0,0,0,0,   1,1, 1,1,  2,2]
         inds_exp_source =  [4,6,8,15,  9,10,0,7,  2,11]
+        conds_flag_source = [self.eid_index_to_cond_dict[k] for k in inds_exp_source]
 
-        conds_flag_target = [0,0,0,   1, 1, 1,  2]
+        #conds_flag_target = [0,0,0,   1, 1, 1,  2]
         inds_exp_target  = [1,5,16,  12,13,14,  3]
+        conds_flag_target = [self.eid_index_to_cond_dict[k] for k in inds_exp_target]
+
 
         conds_flag = [*conds_flag_source, *conds_flag_target]
         inds_experiments = [*inds_exp_source, *inds_exp_target]
@@ -136,8 +143,9 @@ class FEMTOBearingsDataset:
         self.exp_to_cond_dict = exp_to_cond_dict
         loading_cond = [exp_to_cond_dict[k] for i,k in enumerate(np.argmax(self.eid_oh,1))]
         loading_oh = np.zeros([self.eid_oh.shape[0],3])
-        for k in np.unique(loading_cond):
-            loading_oh[loading_cond == k,k] = 1;
+        unique_loading_conds = np.unique(loading_cond)
+        for k in unique_loading_conds:
+            loading_oh[loading_cond == k,list(unique_loading_conds).index(k)] = 1;
         self.loading_oh = loading_oh
 
         inds_experiments = [*inds_exp_source, *inds_exp_target]
@@ -159,7 +167,10 @@ class FEMTOBearingsDataset:
 
         inds_exp_target = [16,2] # manually selected.
         for yy in inds_exp_target:
-            inds_exp_source.remove(yy)
+            try:
+                inds_exp_source.remove(yy)
+            except:
+                None
 
         counts_dict = OrderedDict(exp_and_counts);
         print("training set:")

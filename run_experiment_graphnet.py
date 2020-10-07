@@ -124,7 +124,8 @@ def train(gn_tot, dataset,training_options):
 
 
 if __name__ == "__main__":
-    rundf_path = os.path.join("models_sept20_runs","runs_dataframe")
+    models_root = "models_sept20_runs";
+    rundf_path = os.path.join(models_root,"runs_dataframe")
     femto_dataset = FEMTOBearingsDataset()
     inds_exp_target, inds_exp_source = [femto_dataset.inds_exp_target, femto_dataset.inds_exp_source]
 
@@ -181,6 +182,18 @@ if __name__ == "__main__":
                         'rand_seed' : 42}
     if sys.argv[3] == '--training-options-json':
         training_options_json = sys.argv[4]
+        with open(training_options_json,'r') as f:
+            training_options = json.loads(f.read())
+
+
+    if sys.argv[5] == '--dataset-options':
+        dataset_options_json = sys.argv[6]
+        with open(dataset_options_json,'r') as f:
+            dataset_options = json.loads(f.read())
+
+
+        femto_dataset.set_dataset_config(dataset_options)
+
 
 #    best_training_options = {'learning_rate' : 0.001,
 #                        'schedule_nnodes' :  [1,2,5],
@@ -190,8 +203,8 @@ if __name__ == "__main__":
 #                        'epochs':300,
 #                        'batch' : 300,
 #                        'rand_seed' : 42}
-        with open(training_options_json,'r') as f:
-            training_options = json.loads(f.read())
+
+    experiment_metadata = {"hpr_id" : "1", "description" : "larger graph-states seem to help. The best runs seemed to be with width parameter only 15! Investigating now the effect of CNN parameters."}
 
     
 
@@ -200,7 +213,6 @@ if __name__ == "__main__":
     # edge features (in the RUL application this is time elapsed between observations) and a "core" network that may be applied recursively 
     # several times during evaluation (typical trick of GraphNets to propagate information without weights blowing up).
     gtot = GraphNetFunctionFactory( **model_options)
-    femto_dataset = FEMTOBearingsDataset()
     gtot.make_graphnet_comp_blocks(femto_dataset.X[0].shape[0])
     
     # Training of the model:
@@ -217,7 +229,7 @@ if __name__ == "__main__":
     training_params_hash =  hashlib.md5(json.dumps(training_options).encode("utf-8")).hexdigest()
     model_hash = gtot.get_hash().hexdigest()
     total_hash = hashlib.md5((model_hash + training_params_hash).encode('utf-8')).hexdigest()
-    model_path = os.path.join("models","%s.graphnet"%total_hash)
+    model_path = os.path.join(models_root,"%s.graphnet"%total_hash)
 
     gtot.save(model_path)
     

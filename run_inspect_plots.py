@@ -32,8 +32,11 @@ import sys
 if __name__ == "__main__":
     ## Load model:
     model_path = sys.argv[1]
-    pd.read_pickle("models/runs_dataframe")
-    p = pd.read_pickle("models/runs_dataframe")
+    models_root = 'models_sept20_runs'
+
+    p = pd.read_pickle(os.path.join(models_root,'runs_dataframe'))
+    figures_root = os.path.join(*[models_root,'figures'])
+    #p = pd.read_pickle("models/runs_dataframe")
     p['min_val_loss'] = p['losses'].apply(lambda x : np.min(x['val_loss']))
     
     model_row = p[p['model_path'] == model_path].iloc[0]
@@ -43,7 +46,7 @@ if __name__ == "__main__":
 
     self = gn_tot
 
-    def eval_graphnets(graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = True):
+    def eval_graphnets(graph_data_, iterations = 5, eval_mode = "safe", return_reparametrization = True):
         """
         graph_data_  : is a "graph" object that contains a batch of graphs (more correctly, a graph tuple as DM calls it)
         iterations   : number of core iterations for the computation.
@@ -65,6 +68,7 @@ if __name__ == "__main__":
 
 
     femto_dataset = FEMTOBearingsDataset()
+    femto_dataset.set_dataset_config({'training_set' : model_row.training_set, 'validation_set' : model_row.validation_set})
 
 
     from utils import get_graph_data
@@ -79,10 +83,10 @@ if __name__ == "__main__":
         
         pplot.figure(figsize = (15,10), dpi = 75)
         
-        nnodes_list = [1,2,15]
-        nseq_len = [100,100,200]
+        nnodes_list = [1,10,25]
+        nseq_len = [100,200,300]
         minspacing= [10,10,10]
-        gnsteps  = [ 5,5,5]
+        gnsteps  = [5,5,5]
         
 
         normalization_factor_time = femto_dataset.normalization_factor_time
@@ -95,7 +99,7 @@ if __name__ == "__main__":
                                                  yrem_norm_ = femto_dataset.yrem_norm, n_sampled_graphs = nsampled, 
                                                  nnodes=nnodes, fixed_spacing_indices=False, min_spacing=minspacing_,
                                                  nseq_range=nseq_)
-                probs = eval_graphnets(graphs,gnsteps_, eval_mode="safe")
+                probs = eval_graphnets(graphs,gnsteps_, eval_mode="batched")
                 #eval_graphnets()
                 ids_sorted = np.argsort(y_times)
                 time_grid = np.linspace(np.min(y_times),np.max(y_times), 150);
@@ -107,7 +111,7 @@ if __name__ == "__main__":
 
                 y_times_sorted = y_times[ids_sorted];
                 pplot.subplot( len(experiments_to_plot),len(nnodes_list), kk+1)
-                pplot.pcolor([r for r in range(p_y.shape[1])], time_grid*normalization_factor_time, p_y[:,ids_sorted]**0.5, cmap = "gray")
+                pplot.pcolor([r for r in range(p_y.shape[1])], time_grid*normalization_factor_time, p_y[:,ids_sorted], cmap = "gray")
                 pplot.plot(y_times_sorted  *normalization_factor_time)
                 q90 = np.quantile(probs.sample(1000).numpy(),[0.05,0.95],0)[:,:,0].T[ids_sorted]
 
@@ -119,7 +123,7 @@ if __name__ == "__main__":
 
                 nll = -np.mean(probs.log_prob(y_times[np.newaxis].T))
 
-                title = "Experiment %i\n Observations:%i \nnll:%2.3f"%(ee,nnodes,nll)
+                title = "Experiment %i\n Obs/nodes/nseq/gnstep :%i,%i,%i,%i \nnll:%2.3f"%(ee,nnodes,nseq_, gnsteps_,minspacing_,nll)
                 pplot.title(title)
                 kk+=1
                 #p_y.shape
@@ -129,13 +133,15 @@ if __name__ == "__main__":
         
     #unseen =  inds_exp_source[3:6]#[4:7]#inds_exp_source[0:3] #inds_exp_target[0:3]
 
-    model_hash = model_path[7:-9] 
+    model_hash = model_path[len(models_root)+1 :-9] 
 
     #model_row
     plot_experiments(femto_dataset.inds_exp_target)
 
-    pplot.savefig(os.path.join("models/figures" , str(model_hash) + "_target.png")) ; 
+    print("-"*10)
+    print(figures_root)
+    pplot.savefig(os.path.join(figures_root , str(model_hash) + "_target.png")) ; 
     plot_experiments(femto_dataset.inds_exp_source[0:3])
-    pplot.savefig(os.path.join("models/figures" , str(model_hash) + "_source1.png")) ; 
+    pplot.savefig(os.path.join(figures_root , str(model_hash) + "_source1.png")) ; 
     plot_experiments(femto_dataset.inds_exp_source[3:6])
-    pplot.savefig(os.path.join("models/figures" , str(model_hash) + "_source2.png")) ;
+    pplot.savefig(os.path.join(figures_root , str(model_hash) + "_source2.png")) ;

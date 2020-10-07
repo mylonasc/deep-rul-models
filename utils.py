@@ -106,8 +106,17 @@ def get_graph_data(experiment,  X_ = None, eid_oh_ = None, yrem_norm_ = None,
 def get_graph_data_multiple_experiments(experiments,X_ = None, eid_oh_ = None, yrem_norm_ = None,
                                         nsamples_per_experiment = None,nnodes = None, min_spacing = None, 
                                         nseq_range = None,fixed_spacing_indices = False, full_past_params= None):
+    """
+    If the sequence length of a dataset is larger than the available points the 
+    sequence is truncated to the largest number of available points.
+    """
     all_graph_data = []
     for e in experiments:
+
+        nsamples_ = np.sum(np.argmax(eid_oh_,1) == e)
+        if nseq_range > nsamples_:
+            nseq_range = nsamples_
+
         g = get_graph_data(e,  X_ = X_, eid_oh_ = eid_oh_,
                            yrem_norm_ = yrem_norm_,n_sampled_graphs = nsamples_per_experiment,
                            nnodes = nnodes, min_spacing = min_spacing, nseq_range = nseq_range,
