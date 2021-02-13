@@ -25,8 +25,8 @@ def get_indices(nsamples, ntotal_inds, nmin_idx = 0, nseq_range = None, nmin_idx
     return np.vstack(sample_indices)
 
 
-    
-def get_indices_sample_full_past(nsamples, ntotal_inds ,min_idx_last_node,  nnodes_tot, min_spacing = 5):
+
+def get_indices_sample_full_past(nsamples, ntotal_inds ,min_idx_last_node,  nnodes = None, min_spacing = 5):
     """
     returns indices for a given number of nodes from past.
     These nodes are not to be evaluated in total, but a random subset of those nodes (fixed number) is to be evaluated.
@@ -42,11 +42,18 @@ def get_indices_sample_full_past(nsamples, ntotal_inds ,min_idx_last_node,  nnod
       nnodes_tot        : how many nodes to sample in total. These nodes are typically bootstraped later (if it is a large number) so we don't get memory exhaustion.
 
     """
-    inds_last_node = np.random.choice(range(min_idx_last_node,ntotal_inds-min_idx),nsamples, replace = True)+ min_idx
+
+    inds_last_node = np.random.choice(range(min_idx_last_node,ntotal_inds),nsamples, replace = True)
     all_inds = []
     for i in range(nsamples):
-        new_inds = np.random.choice(range(0,inds_last_node[i], nmin_idx_diff),nnodes_tot, replace = False)
-        all_inds.append(new_inds)
+        try:
+            new_inds = np.random.choice(range(0,inds_last_node[i], min_spacing),nnodes, replace = False)
+            all_inds.append(new_inds)
+        except ValueError:
+
+            print("Probably too small sequence to sample adequate number of nodes. Inputs to np.random.choice:")
+            print(range(0,inds_last_node[i], min_spacing),nnodes)
+
     return np.vstack(all_inds)
 
 
@@ -56,41 +63,42 @@ def data_from_experiment(eid, X_ = None, eid_oh_ = None, yrem_norm_ = None):
     yrem_exp_ = yrem_norm_[ids];
     return Xexp, yrem_exp_
 
-
-def get_graph_data(experiment,  X_ = None, eid_oh_ = None, yrem_norm_ = None, 
+def get_graph_data(experiment,  X_ = None, eid_oh_ = None, yrem_norm_ = None,
                    n_sampled_graphs = 100, nnodes = 3, min_spacing = 20,
                    nseq_range = 100, fixed_spacing_indices = False, node_time_scaling = 5., full_past_params = None):
     """
     Get data ready for evaluation with a graphnet, together with the values of the quantity of interest (e.g. remaining life of component)
     full_past_params: (None) controls a special random sampling strategy where the past nodes are sampled not from a finite sequence of past nodes but from the whole past.
     """
-     
-    # For computational efficiency the number of nodes and edges in each graph is the same. 
+
+    # For computational efficiency the number of nodes and edges in each graph is the same.
     # For efficiency in creating the dataset, the nodes and edges are also created in parallel.
     exp_dat = data_from_experiment(experiment, X_ = X_, eid_oh_ = eid_oh_, yrem_norm_ = yrem_norm_)
     ntotal_inds = exp_dat[0].shape[0];
-    
+
     if full_past_params is None:
         inds = get_indices(n_sampled_graphs, ntotal_inds, nseq_range = nseq_range,
-                              npoints_per_seq = nnodes, nmin_idx_diff = min_spacing, 
+                              npoints_per_seq = nnodes, nmin_idx_diff = min_spacing,
                               fixed_spacing_indices = fixed_spacing_indices)
 
     else:
-        inds = get_indices_sample_full_past(n_sampled_graphs, ntotal_inds,min_idx_last_node = full_past_params['min_idx_last_node'], nnodes_tot = nnodes_tot, min_spacing = min_spacing)
+        inds = get_indices_sample_full_past(n_sampled_graphs, ntotal_inds,
+                                            min_idx_last_node = full_past_params['min_idx_last_node'],
+                                            nnodes = nnodes, min_spacing = min_spacing)
 
     X__, y__ = exp_dat;
     node_attr  = [X__[inds_,...] for inds_ in inds.T];
     node_times = [y__[inds_]*node_time_scaling for inds_ in inds.T]; # to be used for making attributes for the edges.
     nodes= [Node(node_attr_) for node_attr_ in node_attr];
-    
+
     ## Connect all edges with all previous edges:
     edges = []
     for i in range(len(nodes)):
         node_to_idx = i
-        
+
         if node_to_idx == 0:
             next #first node does not have an incoming node.
-            
+
         for node_from_idx in range(0, node_to_idx):
             y_from, y_to = [node_times[ni] for ni in [node_from_idx, node_to_idx]]
             edge_attr = y_to - y_from
@@ -100,6 +108,9 @@ def get_graph_data(experiment,  X_ = None, eid_oh_ = None, yrem_norm_ = None,
     g__.node_times = node_times
     g__.inds = inds
     return g__,node_times[-1] #Returns a graph and a prediction for the time at the graph's destination node.
+
+
+
     
     
 
@@ -130,9 +141,9 @@ def get_multi_batch(nsamples_per_experiment, dataset_object, source_ds = True, n
     # sampling the same number of graphs from each experiment
 
     if source_ds:
-        args = dataset_object.inds_exp_source
+        exp_index_set = dataset_object.inds_exp_source
     else:
-        args = dataset_object.inds_exp_target
+        exp_index_set = dataset_object.inds_exp_target
 
     kwargs = {"X_" : dataset_object.X,
               "yrem_norm_" : dataset_object.yrem_norm,
@@ -144,7 +155,7 @@ def get_multi_batch(nsamples_per_experiment, dataset_object, source_ds = True, n
              "fixed_spacing_indices" : fixed_spacing_indices,
              "full_past_params" : full_past_params}
 
-    return get_graph_data_multiple_experiments(args, **kwargs)
+    return get_graph_data_multiple_experiments(exp_index_set, **kwargs)
 
 
 if __name__ == "__main__":

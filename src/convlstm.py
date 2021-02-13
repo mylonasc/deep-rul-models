@@ -89,27 +89,69 @@ default_head_dt = [{"type" : "input", "kwargs" : {"shape" : (1,)}},
         
 class Conv1DLSTMCell(keras.layers.LSTMCell):
     """
-    A 1D ConvLSTM Cell with parametrized transmissions.
+    A 1D ConvLSTM Cell with parametrized transitions.
     """
-    def __init__(self, units, dt_model_params = None, cnn_model_params = None, concat_size = None, **kwargs):
+    def __init__(self, units, dt_model_params = default_head_dt, 
+            cnn_model_params = default_cnn_layer_params, 
+            concat_size = None, conv_factory = None, dt_factory = None, **kwargs):
+        """
+        Create a conv1D/RNN cell - treats larger multi-scale sequences more easilly than either LSTM or CNN.
+        Practical notes:
+        * To care less about scaling of weights/gradients etc, try and have the outputs of the cnn_model and the dt_model the same dimensionality (otherwise scaling issues will arize).
+
+        parmaeters:
+            units: a global size parameter
+            dt_model_params  : parameters for the model that casts whatever it is that parametrizes transition between RNN cell observations.
+            cnn_model_params : parameters for the model that acts as a feature extractor for instantaneous observations.
         
-        if cnn_model_params is None:
-            cnn_model_params = default_cnn_layer_params
-        if dt_model_params is None:
-            dt_model_params = default_head_dt
-            
+        optional keyword parameters:
+            conv_factory     : overrides the default conv head construction 
+            dt_factory       : overrides the default transition parametrization head extractor
+
+          
+        """
+        
+        self.use_provided_conv_factory = False  ; # may be overriden
+        self.use_provided_dt_factory = False ;# may be overriden
+
+        # Attention: These are overriden if a factory is provided.
         self.dt_model_params = dt_model_params
         self.cnn_model_params = cnn_model_params
+
+        # Having these factory methods makes it easier to compare architectures (I can use the exact same factories for different) 
+        if conv_factory is not None: 
+            self.conv_head_factory = conv_factory
+            self.use_provided_conv_factory = True
+
+        if dt_factory is not None:
+            self.dt_factory = dt_factory
+            self.use_provided_dt_factory = True
+
         
         super(Conv1DLSTMCell, self).__init__( units,**kwargs)
         
     def build(self,other_state_input_shape,timeseries_input_shape):
+        """
+        parameters:
+          other_state_input_shape  : A conditioning input (not passed to the CNN)
+          timeseries_input_shape   : A timeseries (high-freq.) input that is passed to a CNN
+        """
         
-        self.h_cnn = make_seq(self.cnn_model_params, name = "cnn")
+        if self.use_provided_conv_factory == False:
+            self.h_cnn = make_seq(self.cnn_model_params, name = "cnn")
+        else:
+            self.h_cnn = self.conv_head_factory(name = "cnn")
+
         self.h_cnn.build(input_shape = timeseries_input_shape)
-        
-        self.h_x_dt = make_seq(self.dt_model_params, name = "transition_parametrization")
+
+        if not self.use_provided_dt_factory:
+            self.h_x_dt = make_seq(self.dt_model_params, name = "transition_parametrization")
+        else:
+            self.h_x_dt = self.conv_head_factory(name = "transition_parametrization")
+
+
         self.h_x_dt.build(input_shape = other_state_input_shape)
+
         
         self.concat_size  = self.h_x_dt.output_shape[-1] + self.h_cnn.output_shape[-1] #self.h_cnn.output.shape[-1] + self.h_x_dt.output.shape[-1]
         #c = tf.keras.layers.concatenate([self.h_x_dt.output, self.h_cnn.output])

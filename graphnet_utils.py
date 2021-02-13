@@ -16,7 +16,7 @@ def _instantiate_gamma(t, NParams_ = 1):
 
 class GraphNetFunctionFactory:
     def __init__(self, network_size_global= 50, use_prenetworks= True, edge_node_state_size= 15, graph_function_output_activation = "gated_tanh", 
-            n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, conv_block_activation_type = 'leaky_relu', channels_in = 2):
+            n_conv_blocks = 3, nfilts = 18, nfilts2 = 50, ksize = 3, conv_block_activation_type = 'leaky_relu', channels_in = 2, aggregation_function = 'mean'):
         """
         Summary: 
           A factory for graphnet functions. It is custom-made for the problems of RUL from time-series. 
@@ -38,6 +38,7 @@ class GraphNetFunctionFactory:
         self.use_prenetworks = use_prenetworks 
         self.edge_and_node_state_size = edge_node_state_size 
         self.graph_function_output_activation = graph_function_output_activation
+        self.aggregation_function = aggregation_function
         self.model_constr_dict= str(inspect.getargvalues(inspect.currentframe()).locals)
         self.model_str = str(self.model_constr_dict)
         # Passed with other vargs on construction:
@@ -187,9 +188,18 @@ class GraphNetFunctionFactory:
         return _out
 
     @classmethod
-    def make_edge_aggregation_function(self,edge_out_shape):
+    def make_edge_aggregation_function(self,edge_out_shape, type = 'mean'):
+
+        agg_type_to_fn = {'mean' : lambda xin : tf.reduce_mean(xin,0),
+                          'max'  : lambda xin : tf.reduce_max(xin,0),
+                          'sum'  : lambda xin : tf.reduce_sum(xin,0),
+                          'std'  : lambda xin : tf.math.reduce_std(xin,0),
+                          'mixed' : lambda xin :tf.math.reduce_mean(xin,0) + tf.math.reduce_std(xin,0)
+                          }
         xin = tf.keras.layers.Input(shape = (None,edge_out_shape))
-        xout = tf.reduce_mean(xin,0)
+        
+        fn = agg_type_to_fn[type]
+        xout = fn(xin)
         return Model(inputs = xin, outputs= xout)
 
 
@@ -253,7 +263,9 @@ class GraphNetFunctionFactory:
         def conv_block(conv_block_input, names_suffix= ""):
             yout_ = Conv1D(kernel_size = 1 ,  filters = nfilts2, strides = 1, use_bias= False,name = "conv_fcnA"+names_suffix)(conv_block_input)
             yout_ = Conv1D(kernel_size=ksize, filters = nfilts, strides=2  , use_bias= False,name  = "conv_fcnB"+names_suffix)(yout_)
+            #yout_ = tf.keras.layers.BatchNormalization()(yout_)
             yout_ = Conv1D(kernel_size=ksize, filters = nfilts, strides=2  , use_bias= False,name  = "conv_fcnC"+names_suffix)(yout_)
+            #yout_ = tf.keras.layers.BatchNormalization()(yout_)
             if use_dropout:
                 yout_ = Dropout(rate = 0.2)(yout_)
             yout_ = Conv1D(kernel_size=ksize,strides=2, filters = nfilts2,use_bias= True)(yout_)
@@ -320,7 +332,8 @@ class GraphNetFunctionFactory:
         node_to_prob_mlp = self.make_gamma_node_observation_mlp(n_node_state_input);
         node_to_prob_mlp(np.random.randn(batch_size,n_node_state_input))
         node_mlp([vv.astype("float32") for vv in [np.random.randn(batch_size,n_edge_state_input), np.random.randn(batch_size,n_node_state_input)]])
-        per_node_edge_aggregator = self.make_edge_aggregation_function(n_edge_output)
+        per_node_edge_aggregator = self.make_edge_aggregation_function(
+                  n_edge_output, self.aggregation_function)
         edge_aggregation_function = per_node_edge_aggregator
 
         gn = GraphNet(edge_function = edge_mlp,
@@ -332,7 +345,7 @@ class GraphNetFunctionFactory:
 
     
         
-    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = False,return_final_node = False, return_intermediate_graphs = False, node_index_to_use = -1):
+    def eval_graphnets(self,graph_data_, iterations = 5, eval_mode = "batched", return_reparametrization = False,return_final_node = False, return_intermediate_graphs = False, node_index_to_use = -1, return_probs_for_all_nodes = True):
         """
         graph_data_                : is a "graph" object that contains a batch of graphs (more correctly, a graph tuple as DM calls it)
         iterations                 : number of core iterations for the computation.
@@ -355,6 +368,9 @@ class GraphNetFunctionFactory:
         node_final = graph_out.nodes[node_index_to_use].node_attr_tensor
         if return_final_node:
             return node_final
+
+        if return_probs_for_all_nodes:
+            return [self.core.node_to_prob_function(n.node_attr_tensor) for n in graph_out.nodes]
 
         if not return_reparametrization:
             return self.core.node_to_prob_function(node_final)
